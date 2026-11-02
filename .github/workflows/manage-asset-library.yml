@@ -1,0 +1,118 @@
+# Manage persistent anime characters and scene packs (v1).
+name: Manage character and scene library (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Create a pack, update its metadata, or attach another reference"
+        type: choice
+        required: true
+        default: create
+        options:
+          - create
+          - update
+          - add-reference
+      kind:
+        description: "Asset library"
+        type: choice
+        required: true
+        default: character
+        options:
+          - character
+          - scene
+      asset_id:
+        description: "Stable lowercase ID, e.g. aria-001 or moon-forest"
+        type: string
+        required: true
+      name:
+        description: "Display name (required on create; blank means unchanged on update)"
+        type: string
+        required: false
+      description:
+        description: "Identity or environment notes (blank means unchanged on update)"
+        type: string
+        required: false
+      prompt:
+        description: "Canonical visual description for later image generation"
+        type: string
+        required: false
+      negative_prompt:
+        description: "Appearance or scene errors to avoid"
+        type: string
+        required: false
+      tags:
+        description: "Comma-separated lowercase tags"
+        type: string
+        required: false
+      image_url:
+        description: "Optional direct HTTPS PNG/JPEG/WebP/GIF reference; stored permanently"
+        type: string
+        required: false
+      image_role:
+        description: "Reference label, e.g. face, full_body, expression, outfit, main, lighting"
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the selected branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Update canonical pack and reference files
+        env:
+          LIB_OPERATION: ${{ inputs.operation }}
+          LIB_KIND: ${{ inputs.kind }}
+          LIB_ID: ${{ inputs.asset_id }}
+          LIB_NAME: ${{ inputs.name }}
+          LIB_DESCRIPTION: ${{ inputs.description }}
+          LIB_PROMPT: ${{ inputs.prompt }}
+          LIB_NEGATIVE: ${{ inputs.negative_prompt }}
+          LIB_TAGS: ${{ inputs.tags }}
+          LIB_IMAGE_URL: ${{ inputs.image_url }}
+          LIB_IMAGE_ROLE: ${{ inputs.image_role }}
+        run: |
+          set -euo pipefail
+          arguments=("$LIB_OPERATION" --kind "$LIB_KIND" --id "$LIB_ID")
+          if [[ "$LIB_OPERATION" == create || "$LIB_OPERATION" == update ]]; then
+            [[ -z "$LIB_NAME" ]] || arguments+=(--name "$LIB_NAME")
+            [[ -z "$LIB_DESCRIPTION" ]] || arguments+=(--description "$LIB_DESCRIPTION")
+            [[ -z "$LIB_PROMPT" ]] || arguments+=(--prompt "$LIB_PROMPT")
+            [[ -z "$LIB_NEGATIVE" ]] || arguments+=(--negative-prompt "$LIB_NEGATIVE")
+            [[ -z "$LIB_TAGS" ]] || arguments+=(--tags "$LIB_TAGS")
+          fi
+          [[ -z "$LIB_IMAGE_URL" ]] || arguments+=(--image-url "$LIB_IMAGE_URL")
+          arguments+=(--role "$LIB_IMAGE_ROLE")
+          python3 scripts/library.py "${arguments[@]}"
+
+      - name: Save updated character/scene assets to GitHub
+        env:
+          LIB_OPERATION: ${{ inputs.operation }}
+          LIB_KIND: ${{ inputs.kind }}
+          LIB_ID: ${{ inputs.asset_id }}
+        run: |
+          set -euo pipefail
+          git add -- assets/characters assets/scenes
+          if git diff --cached --quiet; then
+            echo "No library changes: the requested state is already present."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Library v1: $LIB_OPERATION $LIB_KIND $LIB_ID"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "Committed persistent library change to ${GITHUB_REF_NAME}."
