@@ -1,5 +1,5 @@
 # Four concurrent CPU workers, one model per draft; v1. Not a training workflow.
-name: Anime Story Director four-runner AI (v2)
+name: Anime Story Director four-runner AI (v3)
 on:
   workflow_dispatch:
     inputs:
@@ -177,12 +177,50 @@ jobs:
         run: |
           python3 scripts/story-director/director-v1.py download --model "$STORY_MODEL" --destination "$RUNNER_TEMP/story-model"
 
+      - name: Mount pinned GGUF over read-only HTTPS Range when SSD is too small
+        if: matrix.rank == 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/story-model/remote-manifest-v1.json"
+          if [ ! -f "$manifest" ]; then
+            echo "Verified GGUF fits on controller local SSD; no FUSE mount needed"
+            exit 0
+          fi
+          test -e /dev/fuse || { echo "::error::Runner has no /dev/fuse; Q4 model exceeds local SSD and requires a remote GGUF mount"; exit 1; }
+          sudo apt-get install -y -qq libfuse2t64 fuse3
+          python3 -m pip install --user 'mfusepy>=1.1,<2'
+          mountpoint_dir="$RUNNER_TEMP/story-model/mounted"
+          mkdir -p "$mountpoint_dir"
+          nohup python3 scripts/story-director/remote-gguf-v1.py \
+            --manifest "$manifest" --mountpoint "$mountpoint_dir" \
+            --provenance "$RUNNER_TEMP/story-model/model-provenance-v1.json" \
+            > "$RUNNER_TEMP/story-fuse.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/story-fuse.pid"
+          mounted=0
+          for n in $(seq 1 60); do
+            if mountpoint -q "$mountpoint_dir"; then mounted=1; break; fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/story-fuse.pid")" 2>/dev/null; then
+              tail -n 50 "$RUNNER_TEMP/story-fuse.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$mounted" != 1 ]; then
+            tail -n 50 "$RUNNER_TEMP/story-fuse.log"
+            echo "::error::Could not mount pinned GGUF remote range filesystem"
+            exit 1
+          fi
+          filename="$(jq -r '.filename' "$manifest")"
+          test -r "$mountpoint_dir/$filename"
+          echo "Pinned remote GGUF visible without occupying local SSD"
+
       - name: Start isolated four-device llama.cpp RPC inference
         if: matrix.rank == 0
         shell: bash
         run: |
           set -euo pipefail
-          model="$(find "$RUNNER_TEMP/story-model" -maxdepth 1 -name '*.gguf' -type f -print -quit)"
+          model="$(find "$RUNNER_TEMP/story-model" -maxdepth 2 -name '*.gguf' -type f -print -quit)"
           test -n "$model"
           rpc="$(cat "$RUNNER_TEMP/story-rpc-addresses.txt")"
           "$RUNNER_TEMP/story-llama-build/bin/llama-server" --model "$model" --alias "$STORY_MODEL" --rpc "$rpc" --n-gpu-layers 99 --ctx-size 8192 --threads 4 --parallel 1 --host 127.0.0.1 --port 8080 > "$RUNNER_TEMP/story-llama-server.log" 2>&1 &
