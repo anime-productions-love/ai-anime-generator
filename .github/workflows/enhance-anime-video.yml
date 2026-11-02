@@ -1,5 +1,5 @@
-# Post-process existing anime video; does not rerun Wan or SVD (v1).
-name: Smooth or speed up anime video (RIFE AI) (v1)
+# Post-process existing anime video; does not rerun Wan or SVD (v2).
+name: Smooth or speed up anime video (RIFE AI) (v2)
 
 on:
   workflow_dispatch:
@@ -73,6 +73,10 @@ jobs:
       GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
       GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
       GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
+      GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      GALLERY_PAT: ${{ secrets.GALLERY_PAT }}
+      VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
       SOURCE_RUN: ${{ inputs.source_run }}
       VIDEO_URL: ${{ inputs.video_url }}
       SOURCE_REPO: ${{ inputs.source_repo }}
@@ -132,7 +136,7 @@ jobs:
       - name: Upload enhanced MP4, final frame and timing metadata
         uses: actions/upload-artifact@v4
         with:
-          name: anime-smooth-video-v1-${{ github.run_id }}
+          name: anime-smooth-video-v2-${{ github.run_id }}
           path: |
             outputs/enhanced/video.mp4
             outputs/enhanced/last_frame.png
