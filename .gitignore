@@ -1,4 +1,4 @@
-# Anime Story Generator v1 — keep durable reference images in Git.
+# Anime Story Generator v2 — keep durable reference images in Git.
 __pycache__/
 *.py[cod]
 .venv/
@@ -13,3 +13,7 @@ models/
 *.ip-adapter
 *.ip-adapter-embeds
 .DS_Store
+
+# Ephemeral model inputs, inference plans and candidate cache.
+work/
+.huggingface/
