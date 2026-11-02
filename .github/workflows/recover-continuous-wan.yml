@@ -1,0 +1,63 @@
+# Bounded automatic recovery for failed multi-clip Wan jobs (v1).
+# Never retry an ambiguous successor dispatch to avoid duplicate scenes.
+name: Recover failed continuous Wan scene (v1)
+
+on:
+  workflow_run:
+    workflows:
+      - Generate Wan 2.2 Turbo anime scene (v8)
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: wan-recovery-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  recovery:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN: ${{ github.event.workflow_run.id }}
+      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - name: Retry only eligible failed chain jobs, maximum two retries
+        shell: bash
+        run: |
+          set -euo pipefail
+          if (( RUN_ATTEMPT >= 3 )); then
+            echo "Run $SOURCE_RUN has reached the two automatic retry limit." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Failure must belong to a chain, never a manually launched single clip.
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | .name')"
+          if ! grep -qx "wan-chain-recovery-v1-$SOURCE_RUN" <<< "$artifacts"; then
+            echo "Not an eligible recorded chain segment; no automatic retry." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          failed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs?per_page=100" \
+            --jq '.jobs[].steps[] | select(.conclusion == "failure") | .name')"
+          if [[ -z "$failed" ]]; then
+            echo "No unambiguous failing step; no automatic retry." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if grep -q "^Dispatch next scene or final movie" <<< "$failed"; then
+            echo "::warning::Successor-dispatch failure requires review to prevent duplicate video jobs."
+            exit 0
+          fi
+          # Only retry defined network/build/model or post-render persistence steps.
+          if grep -Eq '^(Resolve image|Restore|Build stable-diffusion|Download missing Wan|Generate prompt-directed scene|Record successful chain|Publish complete scene artifact|Archive every Wan output)' <<< "$failed"; then
+            echo "Automatic retry for chain run $SOURCE_RUN, attempt $RUN_ATTEMPT; failed: $failed"
+            gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/rerun-failed-jobs"
+            echo "Submitted bounded retry ($RUN_ATTEMPT/2 prior retries) for run $SOURCE_RUN." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Non-retriable failing step; no automatic retry: $failed" >> "$GITHUB_STEP_SUMMARY"
+          fi
