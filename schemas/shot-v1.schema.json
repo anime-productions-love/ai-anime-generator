@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Anime Story Generator Shot Manifest v1",
+  "title": "Anime Story Generator Shot Manifest v2 (compatible with schema_version v1)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -235,6 +235,49 @@
     "updated_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "guidance": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "base",
+            "ip-adapter",
+            "controlnet",
+            "both"
+          ]
+        },
+        "ip_adapter_references": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "control_reference": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "character_loras": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "continuity_evaluation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
     }
-  }
+  },
+  "description": "Phase 3 optional identity and layout guidance plus advisory visual similarity, backwards compatible with Phase 2 shot manifests."
 }
