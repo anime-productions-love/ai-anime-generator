@@ -1,0 +1,154 @@
+# Generate first/next anime storyboard shot with saved character/scene memory (v1).
+name: Generate or continue anime story shot (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Start a new sequence or continue its most recent selected shot"
+        type: choice
+        required: true
+        default: start
+        options:
+          - start
+          - continue
+      story_id:
+        description: "Story ID, e.g. story-001"
+        type: string
+        required: true
+      sequence_id:
+        description: "Sequence ID, e.g. seq-001"
+        type: string
+        required: true
+      character_ids:
+        description: "Comma-separated saved character IDs; blank to inherit on continue"
+        type: string
+        required: false
+      scene_id:
+        description: "Saved scene ID; blank to inherit on continue"
+        type: string
+        required: false
+      shot_prompt:
+        description: "New action, expression, camera, and story moment"
+        type: string
+        required: true
+      width:
+        description: "Output width, 256-1536, divisible by 8 (512 recommended first)"
+        type: number
+        default: 512
+        required: true
+      height:
+        description: "Output height, 256-1536, divisible by 8 (768 portrait)"
+        type: number
+        default: 768
+        required: true
+      candidates:
+        description: "Generate 1-4 candidates. First becomes canonical until changed."
+        type: number
+        default: 1
+        required: true
+      seed:
+        description: "First candidate seed; next candidates use seed+1"
+        type: number
+        default: 42
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      HF_HOME: /tmp/huggingface
+      HF_XET_CHUNK_CACHE_SIZE_BYTES: "0"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out saved characters, scenes, and story history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Resolve saved asset identities, references and previous shot
+        env:
+          MODE: ${{ inputs.mode }}
+          STORY: ${{ inputs.story_id }}
+          SEQUENCE: ${{ inputs.sequence_id }}
+          CHARACTERS: ${{ inputs.character_ids }}
+          SCENE: ${{ inputs.scene_id }}
+          PROMPT: ${{ inputs.shot_prompt }}
+          WIDTH: ${{ inputs.width }}
+          HEIGHT: ${{ inputs.height }}
+          CANDIDATES: ${{ inputs.candidates }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          python3 scripts/story.py prepare \
+            --mode "$MODE" \
+            --story-id "$STORY" \
+            --sequence-id "$SEQUENCE" \
+            --characters "$CHARACTERS" \
+            --scene-id "$SCENE" \
+            --prompt "$PROMPT" \
+            --width "$WIDTH" \
+            --height "$HEIGHT" \
+            --candidates "$CANDIDATES" \
+            --seed "$SEED" \
+            --steps 28 \
+            --cfg 6.5 \
+            --plan work/shot-plan.json
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only PyTorch
+        run: python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+
+      - name: Install pinned image-generation dependencies
+        run: python -m pip install --no-cache-dir -r requirements-image-v1.txt
+
+      - name: Generate anime story candidate image(s)
+        run: |
+          python3 -u scripts/generate_shot.py \
+            --plan work/shot-plan.json \
+            --output-dir work/candidates
+
+      - name: Publish canonical shot, alternatives, and sequence memory
+        run: |
+          python3 scripts/story.py publish \
+            --plan work/shot-plan.json \
+            --candidate-dir work/candidates
+
+      - name: Persist successful shot back into Git history
+        env:
+          STORY: ${{ inputs.story_id }}
+          SEQUENCE: ${{ inputs.sequence_id }}
+        run: |
+          set -euo pipefail
+          git add -- stories
+          if git diff --cached --quiet; then
+            echo "::error::Generation produced no persistent story files."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Story shot v1: $STORY / $SEQUENCE"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Upload generated shots and reproducibility plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-story-shot-v1-${{ github.run_id }}
+          path: |
+            work/candidates/
+            work/shot-plan.json
+          retention-days: 7
+          if-no-files-found: error
