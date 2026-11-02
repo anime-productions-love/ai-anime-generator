@@ -1,5 +1,5 @@
-# Optional bridge from verified selected anime shot to existing Wan/SVD workflows (v2).
-name: Export or send selected anime shot to video generator (v2)
+# Optional bridge from verified selected anime shot to active Wan workflow (v3).
+name: Export or send selected anime shot to video generator (v3)
 
 on:
   workflow_dispatch:
@@ -23,7 +23,6 @@ on:
         default: wan
         options:
           - wan
-          - svd
       action:
         description: "Export manifest only, or dispatch video generation"
         type: choice
