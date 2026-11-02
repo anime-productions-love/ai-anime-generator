@@ -1,0 +1,219 @@
+# Start ONE uninterrupted Wan sequence: exactly 25 native GitHub form inputs (v1).
+name: Start continuous Wan anime scene (2-17 videos) (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_count:
+        description: "Number of consecutive clips. Fill prompt boxes 1 through this number."
+        type: choice
+        required: true
+        default: "2"
+        options:
+          - "2"
+          - "3"
+          - "4"
+          - "5"
+          - "6"
+          - "7"
+          - "8"
+          - "9"
+          - "10"
+          - "11"
+          - "12"
+          - "13"
+          - "14"
+          - "15"
+          - "16"
+          - "17"
+      start_image:
+        description: "ONLY the first image; supports private gallery blob/commit URLs"
+        type: string
+        required: true
+      negative_prompt:
+        description: "Shared negative prompt used unchanged by all videos"
+        type: string
+        required: false
+        default: "frozen frame, flicker, jitter, warped face, deformed anatomy, text, watermark"
+      fit_mode:
+        description: "Shared image framing (unchanged across the whole sequence)"
+        type: choice
+        required: true
+        default: contain-blur
+        options:
+          - contain-blur
+          - contain
+          - crop
+      frames:
+        description: "Delivered frames PER video; same value throughout"
+        type: number
+        required: true
+        default: 42
+      fps:
+        description: "Playback FPS for every video (e.g. 4, 6, 8)"
+        type: number
+        required: true
+        default: 4
+      frame_size:
+        description: "Shared WxH dimensions, e.g. 480x832 or 832x480"
+        type: string
+        required: true
+        default: "480x832"
+      seed:
+        description: "Same seed for every video (e.g. 42)"
+        type: number
+        required: true
+        default: 42
+      video_01_prompt:
+        description: "Video 1 motion and camera instructions (always required)"
+        type: string
+        required: true
+      video_02_prompt:
+        description: "Video 2 motion and camera instructions (always required)"
+        type: string
+        required: true
+      video_03_prompt:
+        description: "Video 3 motion and camera instructions"
+        type: string
+        required: false
+      video_04_prompt:
+        description: "Video 4 motion and camera instructions"
+        type: string
+        required: false
+      video_05_prompt:
+        description: "Video 5 motion and camera instructions"
+        type: string
+        required: false
+      video_06_prompt:
+        description: "Video 6 motion and camera instructions"
+        type: string
+        required: false
+      video_07_prompt:
+        description: "Video 7 motion and camera instructions"
+        type: string
+        required: false
+      video_08_prompt:
+        description: "Video 8 motion and camera instructions"
+        type: string
+        required: false
+      video_09_prompt:
+        description: "Video 9 motion and camera instructions"
+        type: string
+        required: false
+      video_10_prompt:
+        description: "Video 10 motion and camera instructions"
+        type: string
+        required: false
+      video_11_prompt:
+        description: "Video 11 motion and camera instructions"
+        type: string
+        required: false
+      video_12_prompt:
+        description: "Video 12 motion and camera instructions"
+        type: string
+        required: false
+      video_13_prompt:
+        description: "Video 13 motion and camera instructions"
+        type: string
+        required: false
+      video_14_prompt:
+        description: "Video 14 motion and camera instructions"
+        type: string
+        required: false
+      video_15_prompt:
+        description: "Video 15 motion and camera instructions"
+        type: string
+        required: false
+      video_16_prompt:
+        description: "Video 16 motion and camera instructions"
+        type: string
+        required: false
+      video_17_prompt:
+        description: "Video 17 motion and camera instructions"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  start:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out canonical production repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Materialize one shared configuration and the chosen video prompts
+        env:
+          VIDEO_COUNT: ${{ inputs.video_count }}
+          START_IMAGE: ${{ inputs.start_image }}
+          NEGATIVE_PROMPT: ${{ inputs.negative_prompt }}
+          FIT_MODE: ${{ inputs.fit_mode }}
+          FRAMES: ${{ inputs.frames }}
+          FPS: ${{ inputs.fps }}
+          FRAME_SIZE: ${{ inputs.frame_size }}
+          SEED: ${{ inputs.seed }}
+          PROMPT_01: ${{ inputs.video_01_prompt }}
+          PROMPT_02: ${{ inputs.video_02_prompt }}
+          PROMPT_03: ${{ inputs.video_03_prompt }}
+          PROMPT_04: ${{ inputs.video_04_prompt }}
+          PROMPT_05: ${{ inputs.video_05_prompt }}
+          PROMPT_06: ${{ inputs.video_06_prompt }}
+          PROMPT_07: ${{ inputs.video_07_prompt }}
+          PROMPT_08: ${{ inputs.video_08_prompt }}
+          PROMPT_09: ${{ inputs.video_09_prompt }}
+          PROMPT_10: ${{ inputs.video_10_prompt }}
+          PROMPT_11: ${{ inputs.video_11_prompt }}
+          PROMPT_12: ${{ inputs.video_12_prompt }}
+          PROMPT_13: ${{ inputs.video_13_prompt }}
+          PROMPT_14: ${{ inputs.video_14_prompt }}
+          PROMPT_15: ${{ inputs.video_15_prompt }}
+          PROMPT_16: ${{ inputs.video_16_prompt }}
+          PROMPT_17: ${{ inputs.video_17_prompt }}
+        run: |
+          python3 scripts/wan_sequence_form.py --run-id "$GITHUB_RUN_ID"
+
+      - name: Commit sequence plan for all future continuation runs
+        run: |
+          set -euo pipefail
+          plan="chains/chain-${GITHUB_RUN_ID}.json"
+          git add -- "$plan"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Wan continuous sequence plan v2: ${GITHUB_RUN_ID}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Launch first Wan scene automatically
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/generate-wan22-ti2v-turbo.yml/dispatches" \
+            -f "ref=${GITHUB_REF_NAME}" \
+            -f "inputs[chain_plan]=chains/chain-${GITHUB_RUN_ID}.json" \
+            -f "inputs[chain_step]=1" \
+            -f "inputs[source_mode]=auto"
+          echo "First Wan scene dispatched; this confirms acceptance, not video completion."
+
+      - name: Show production tracking link
+        run: |
+          {
+            echo "### Continuous Wan scene submitted"
+            echo ""
+            echo "- Sequence plan: chains/chain-${GITHUB_RUN_ID}.json"
+            echo "- Video count: ${{ inputs.video_count }}"
+            echo "- All later clips take the exact previous Wan final frame"
+            echo "- Shared video configuration is frozen for the entire scene"
+            echo "- Generated clips: https://github.com/${GITHUB_REPOSITORY}/actions/workflows/generate-wan22-ti2v-turbo.yml"
+            echo "- After the last clip, movie assembly starts automatically"
+          } >> "$GITHUB_STEP_SUMMARY"
