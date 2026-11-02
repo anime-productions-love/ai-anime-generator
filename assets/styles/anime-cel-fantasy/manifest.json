@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "kind": "style",
+  "id": "anime-cel-fantasy",
+  "name": "Cinematic Fantasy Anime — Cel-Shaded",
+  "prompt_prefix": "High-quality hand-drawn 2D anime illustration, coherent character design, crisp expressive linework, cinematic shot composition, detailed painted backgrounds, rich but controlled color palette, polished cel shading, emotionally readable expressions",
+  "negative_prompt": "inconsistent character appearance, missing facial features, malformed hands, inaccurate body proportions, nonsensical background geometry, inconsistent lighting, text, watermark",
+  "linework": "Clean, deliberate anime line art with stable facial proportions and consistent clothing details",
+  "shading": "Hand-drawn anime cel shading with soft atmospheric environment lighting",
+  "palette": [
+    "deep midnight blue",
+    "warm amber highlights",
+    "muted violet",
+    "cool silver",
+    "natural skin tones"
+  ]
+}
