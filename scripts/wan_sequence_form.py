@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn the 25-field GitHub form into one immutable Wan sequence plan (v1).
+"""Turn the 25-field GitHub form into one immutable Wan sequence plan (v2).
 
 This script accepts ONLY the starting image, ONE shared configuration, and
 the first N filled motion-prompt fields. The workflow commits the plan before
@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 from wan_chain import ROOT, parse_config
 
-MAX_PROMPTS = 17
+MAX_PROMPTS = 15
 
 
 def required(name):
@@ -69,6 +69,14 @@ def build(run_id):
         "height": height,
         "seed": integer("SEED", 0, 2147483647),
     }
+    finish = required("FINISH_PRESET")
+    found = re.fullmatch(r"(motion|rife)-([0-9]{2})fps-([0-9.]+)x", finish)
+    if not found:
+        raise ValueError("FINISH_PRESET must be method-FPS-speed, e.g. motion-24fps-1.5x")
+    method, fps, speed = found.groups()
+    seam = required("SEAM_MODE")
+    if seam not in ("cut", "motion-seam"):
+        raise ValueError("SEAM_MODE must be cut or motion-seam")
     plan = {
         "version": "v2",
         "title": f"Continuous Wan sequence {run_id}",
@@ -78,7 +86,10 @@ def build(run_id):
         "assembly": {
             "enabled": True, "width": width,
             "height": height, "fps": settings["fps"],
-            "transition": "cut", "fade_seconds": "0", "quality_crf": 20,
+            "transition": seam, "fade_seconds": "0", "quality_crf": 20,
+        },
+        "postprocess": {
+            "method": method, "target_fps": int(fps), "speed": float(speed),
         },
     }
     destination = ROOT / "chains" / f"chain-{run_id}.json"
