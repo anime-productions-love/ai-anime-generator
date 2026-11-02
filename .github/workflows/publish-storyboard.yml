@@ -1,0 +1,110 @@
+# CPU-only comic page and storyboard archive assembly (v1).
+name: Publish anime comic pages and storyboard (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      story_id:
+        description: "Existing saved story identifier"
+        type: string
+        required: true
+      sequence_id:
+        description: "Existing saved sequence identifier"
+        type: string
+        required: true
+      shot_ids:
+        description: "Ordered comma-separated selected shot IDs, blank = all (max 48)"
+        type: string
+        required: false
+      captions:
+        description: "Optional one caption per shot separated by || (blank = no captions)"
+        type: string
+        required: false
+      layout:
+        description: "Comic panels, vertical strip, or three-column grid"
+        type: choice
+        default: comic
+        options:
+          - comic
+          - vertical
+          - grid
+        required: true
+      per_page:
+        description: "Panels on each comic page (1-8)"
+        type: number
+        default: 4
+        required: true
+      page_size:
+        description: "Comic page canvas orientation"
+        type: choice
+        default: portrait
+        options:
+          - portrait
+          - landscape
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      STORY: ${{ inputs.story_id }}
+      SEQUENCE: ${{ inputs.sequence_id }}
+      SHOT_IDS: ${{ inputs.shot_ids }}
+      CAPTIONS: ${{ inputs.captions }}
+      LAYOUT: ${{ inputs.layout }}
+      PER_PAGE: ${{ inputs.per_page }}
+      PAGE_SIZE: ${{ inputs.page_size }}
+    steps:
+      - name: Checkout canonical published shots and reference history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install Pillow (no AI model required)
+        run: python3 -m pip install --no-cache-dir 'Pillow==11.3.0'
+
+      - name: Assemble verified comic pages and a reusable storyboard ZIP
+        run: |
+          python3 scripts/assemble_storyboard.py \
+            --story-id "$STORY" \
+            --sequence-id "$SEQUENCE" \
+            --shot-ids "$SHOT_IDS" \
+            --captions "$CAPTIONS" \
+            --layout "$LAYOUT" \
+            --per-page "$PER_PAGE" \
+            --page-size "$PAGE_SIZE" \
+            --export-id "$GITHUB_RUN_ID"
+
+      - name: Save permanent comic pages and export manifest in GitHub
+        run: |
+          set -euo pipefail
+          git add -- "stories/$STORY/sequences/$SEQUENCE/exports/export-$GITHUB_RUN_ID"
+          if git diff --cached --quiet; then
+            echo "::error::Expected immutable comic export files were not created"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Anime comic export v1: $STORY/$SEQUENCE ($GITHUB_RUN_ID)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Upload comic CBZ and storyboard ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-storyboard-v1-${{ github.run_id }}
+          path: |
+            work/production/comic-pages-v1.cbz
+            work/production/storyboard-v1.zip
+            work/production/export-info.json
+          if-no-files-found: error
+          retention-days: 7
