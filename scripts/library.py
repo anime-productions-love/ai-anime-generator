@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Git-backed character and scene library manager (v3).
+"""Git-backed character and scene library manager (v4).
 
 Python standard library only. Phase 1 stores durable reference images and
 reusable manifests; it does not train LoRAs or invoke an image generator.
@@ -17,6 +17,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+from gallery_source import fetch_gallery_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 KIND_DIR = {"character": "characters", "scene": "scenes"}
@@ -141,16 +143,20 @@ def get_reference_bytes(args):
     if bool(args.image_url) == bool(args.file):
         raise ValueError("attach exactly one reference source: --image-url or --file")
     if args.image_url:
-        validate_public_https_url(args.image_url)
-        opener = urllib.request.build_opener(SafeRedirects)
-        request = urllib.request.Request(
-            args.image_url,
-            headers={"User-Agent": "AnimeStoryLibrary/1.0", "Accept": "image/*"},
-        )
-        with opener.open(request, timeout=40) as response:
-            if "text/html" in response.headers.get("Content-Type", "").lower():
-                raise ValueError("image URL returned HTML, not a raw image")
-            data = response.read(MAX_IMAGE_SIZE + 1)
+        gallery_data = fetch_gallery_bytes(args.image_url, MAX_IMAGE_SIZE)
+        if gallery_data is not None:
+            data = gallery_data
+        else:
+            validate_public_https_url(args.image_url)
+            opener = urllib.request.build_opener(SafeRedirects)
+            request = urllib.request.Request(
+                args.image_url,
+                headers={"User-Agent": "AnimeStoryLibrary/1.0", "Accept": "image/*"},
+            )
+            with opener.open(request, timeout=40) as response:
+                if "text/html" in response.headers.get("Content-Type", "").lower():
+                    raise ValueError("image URL returned HTML, not a raw image")
+                data = response.read(MAX_IMAGE_SIZE + 1)
         source = urllib.parse.urlsplit(args.image_url)
         # Do not persist signed URL query tokens in a public Git repository.
         source_name = urllib.parse.urlunsplit(
