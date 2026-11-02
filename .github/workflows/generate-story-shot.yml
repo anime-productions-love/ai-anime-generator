@@ -1,5 +1,5 @@
-# Generate first/next anime storyboard shot with Phase 3 identity and layout guidance (v3).
-name: Generate or continue anime story shot (v3)
+# Generate first/next anime storyboard shot with Phase 3 identity and layout guidance (v4).
+name: Generate or continue anime story shot (v4)
 
 on:
   workflow_dispatch:
@@ -168,10 +168,18 @@ jobs:
       - name: Upload generated shots and reproducibility plan
         uses: actions/upload-artifact@v4
         with:
-          name: anime-story-shot-v3-${{ github.run_id }}
+          name: anime-story-shot-v4-${{ github.run_id }}
           path: |
             work/candidates/
             work/shot-plan.json
             work/continuity.json
           retention-days: 7
           if-no-files-found: error
+
+      - name: Permanently preserve source images, candidate PNGs, and manifests in private gallery
+        if: success()
+        env:
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+        run: |
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind storyboard --source work
