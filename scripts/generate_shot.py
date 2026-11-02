@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v5).
+"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v6).
 
 Guidance is opt-in to preserve Phase 2's low-memory baseline:
   base         one img2img reference or text-to-image
@@ -111,6 +111,7 @@ def main():
         pipeline.load_lora_weights(
             repo_id, weight_name="pytorch_lora_weights.safetensors",
             adapter_name=adapter_name,
+            revision=item.get("revision"),
             use_safetensors=True,
         )
         lora_names.append(adapter_name)
