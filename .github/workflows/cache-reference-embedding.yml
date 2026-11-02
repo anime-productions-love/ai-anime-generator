@@ -1,0 +1,87 @@
+# Cache one verified character/scene reference for Phase 3 IP-Adapter (v1).
+name: Cache anime reference embedding (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "Reference library"
+        type: choice
+        required: true
+        default: character
+        options:
+          - character
+          - scene
+      asset_id:
+        description: "Saved character or scene ID"
+        type: string
+        required: true
+      reference_role:
+        description: "Saved reference role, such as face, full_body, main or background"
+        type: string
+        required: true
+        default: main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      HF_HOME: /tmp/huggingface
+      HF_XET_CHUNK_CACHE_SIZE_BYTES: "0"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      KIND: ${{ inputs.kind }}
+      ASSET_ID: ${{ inputs.asset_id }}
+      REF_ROLE: ${{ inputs.reference_role }}
+    steps:
+      - name: Checkout permanent character and scene references
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU PyTorch
+        run: python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+
+      - name: Install model requirements
+        run: python -m pip install --no-cache-dir -r requirements-image-v2.txt
+
+      - name: Compute verified reusable image embeddings
+        run: |
+          python3 -u scripts/build_ip_embeddings.py \
+            --kind "$KIND" \
+            --id "$ASSET_ID" \
+            --role "$REF_ROLE"
+
+      - name: Commit reusable safe-tensor cache
+        run: |
+          set -euo pipefail
+          case "$KIND" in
+            character) pack=characters ;;
+            scene) pack=scenes ;;
+            *) echo "::error::Invalid asset kind"; exit 1 ;;
+          esac
+          if ! [[ "$ASSET_ID" =~ ^[a-z0-9][a-z0-9_-]{1,63}$ ]]; then
+            echo "::error::Invalid asset ID"; exit 1
+          fi
+          git add -f -- "assets/$pack/$ASSET_ID/embeds/"
+          if git diff --cached --quiet; then
+            echo "The reference embedding was already up-to-date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Reference embedding v1: $KIND/$ASSET_ID/$REF_ROLE"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
