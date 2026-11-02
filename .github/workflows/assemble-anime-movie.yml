@@ -1,5 +1,5 @@
-# Compose already-generated Wan 2.2 / SVD-XT clip artifacts (v3).
-name: Assemble anime movie from scenes (v3)
+# Compose already-generated Wan/SVD or interpolated clip artifacts (v4).
+name: Assemble anime movie from scenes (v4)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ on:
         default: 832
         required: true
       fps:
-        description: "Final movie FPS, 1-60"
+        description: "Final movie FPS, 1-60 (use 24 for interpolated clips)"
         type: number
         default: 8
         required: true
@@ -90,10 +90,10 @@ jobs:
             fi
             mapfile -t matches < <(
               printf '%s\n' "$artifact_names" |
-                grep -E "^((wan22-turbo)|(svd-xt))-v[0-9]+-$id$" || true
+                grep -E "^((wan22-turbo)|(svd-xt)|(anime-smooth-video))-v[0-9]+-$id$" || true
             )
             if [ "${#matches[@]}" -ne 1 ]; then
-              echo "::error::Run $id must have exactly one unexpired Wan/SVD video artifact; found ${#matches[@]}."
+              echo "::error::Run $id must have exactly one unexpired Wan/SVD or interpolated video artifact; found ${#matches[@]}."
               exit 1
             fi
             number=$((number + 1))
@@ -128,7 +128,7 @@ jobs:
       - name: Upload finished anime movie and scene timeline
         uses: actions/upload-artifact@v4
         with:
-          name: anime-movie-v3-${{ github.run_id }}
+          name: anime-movie-v4-${{ github.run_id }}
           path: |
             outputs/movie/movie.mp4
             outputs/movie/timeline.json
