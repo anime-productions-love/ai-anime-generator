@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v13
+# AI Anime Story Generator — v14
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -14,7 +14,7 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Publish anime comic pages and storyboard (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/publish-storyboard.yml) | Generate permanent comic-page PNGs, a CBZ comic and storyboard ZIP from approved images |
 | [Export or send selected anime shot to video generator (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/send-shot-to-video.yml) | Export a commit-pinned selected shot or dispatch a video generator in this same repository |
 | [Start continuous Wan anime scene (2–15 videos) (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/start-continuous-wan-scene.yml) | Fill a GitHub form with 2–15 motion prompts, and shared finishing settings and one shared video configuration; automatically generate and assemble the complete scene |
-| [Anime Story Director four-runner AI (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/anime-story-director-quad-v1.yml) | Select Muse Glimmer 30B, Qwen3.8-27B or Qwen3.6-35B-A3B; coordinate four private CPU runners for story draft generation, no automatic render |
+| [Anime Story Director four-runner AI (v7)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/anime-story-director-quad-v1.yml) | Select Muse Glimmer 30B, Qwen3.8-27B or Qwen3.6-35B-A3B; coordinate four private CPU runners to plan whole episodes and detailed clips in unlimited-length resumable batches, no automatic render |
 | [Generate Wan 2.2 Turbo anime scene (v9)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-wan22-ti2v-turbo.yml) | Generate a prompt-directed video from a character image, private-gallery URL, or previous Wan clip |
 | [Smooth or speed up anime video (RIFE AI) (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
 | [Assemble anime movie from scenes (v6)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
@@ -55,7 +55,7 @@ Model GGUFs are source-referenced, quantized, and SHA-256-identified in [models-
 
 To enable the workflow, the anime-generator repository needs its own `TS_OAUTH_CLIENT_ID` Actions secret and a corresponding `tag:ai-training` OIDC trust policy in Tailscale; Contract-Automation's Actions secret is **not automatically shared**. The live multi-runner inference, disk fallback and CPU performance are **unverified**, and **no tests or inference jobs were executed** when installing this source.
 
-[Complete Story Director v1 setup guide](docs/STORY-DIRECTOR-QUAD-v1.md). This initial workflow outputs an **unapproved story/shot plan** for human review, not an automatic video production request. The optional vision projectors and Cloudflare approval integration are not yet activated.
+[Complete Story Director setup guide v2](docs/STORY-DIRECTOR-QUAD-v1.md). The director outlines any number of **episode scenes** and produces any number of **consecutive clip prompts per scene** without arbitrary creative caps. Requests are batched (up to 8 scenes or 10 clips per model call) and source-bound partial drafts can resume in later runs. This produces an **unapproved episode or scene draft**, not a finished/rendered episode. Existing Wan rendering plans still have their own per-run technical limits; cross-plan scene continuation and final episode assembly are not connected yet. The optional vision projectors and Cloudflare approval integration are not yet activated.
 
 ## Production enhancements — archiving, recovery, caching and Cloudflare
 
