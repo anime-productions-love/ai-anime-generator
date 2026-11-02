@@ -1,5 +1,5 @@
 # Four concurrent CPU workers, one model per draft; v1. Not a training workflow.
-name: Anime Story Director four-runner AI (v5)
+name: Anime Story Director four-runner AI (v6)
 on:
   workflow_dispatch:
     inputs:
@@ -20,10 +20,30 @@ on:
         description: Optional already checked-in stories/... file
         type: string
         default: ""
-      clips:
-        description: How many shots should AI plan (2 to 33)
+      stage:
+        description: "Plan the episode outline or detail one scene's clips"
+        type: choice
+        required: true
+        default: episode
+        options:
+          - episode
+          - scene
+      scenes:
+        description: "Optional preferred scene count; 0 = let director decide (no maximum)"
         type: number
-        default: 8
+        default: 0
+      episode_run:
+        description: "For scene: GitHub run ID containing the episode outline draft"
+        type: string
+        default: ""
+      scene_index:
+        description: "For scene: ordinal scene number in the episode outline"
+        type: number
+        default: 1
+      resume_run:
+        description: "Optional prior same-stage partial draft run ID to continue"
+        type: string
+        default: ""
       frames:
         description: Fixed Wan frames for each shot
         type: number
@@ -156,18 +176,62 @@ jobs:
             tailscale ping --c=1 --timeout=10s "${peer%:*}" >/dev/null || { echo "::error::Remote RPC node disconnected"; exit 1; }
           done
 
-      - name: Prepare source-bound draft-only story instructions
+      - name: Recover exact previous episode or stage checkpoint
+        if: matrix.rank == 0 && (inputs.stage == 'scene' || inputs.resume_run != '')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE: ${{ inputs.stage }}
+          EPISODE_RUN: ${{ inputs.episode_run }}
+          RESUME_RUN: ${{ inputs.resume_run }}
+        run: |
+          set -euo pipefail
+          if [ "$STAGE" = scene ]; then
+            [[ "$EPISODE_RUN" =~ ^[0-9]{4,24}$ ]] || { echo "::error::For scene details, provide the source episode outline run ID"; exit 1; }
+            mkdir -p "$RUNNER_TEMP/story-episode"
+            gh run download "$EPISODE_RUN" -R "$GITHUB_REPOSITORY" \
+              --name "anime-story-director-draft-v1-$EPISODE_RUN" \
+              --dir "$RUNNER_TEMP/story-episode"
+            test -s "$RUNNER_TEMP/story-episode/story-draft-v1.json"
+            test -s "$RUNNER_TEMP/story-episode/source-plan.json"
+          fi
+          if [ -n "$RESUME_RUN" ]; then
+            [[ "$RESUME_RUN" =~ ^[0-9]{4,24}$ ]] || { echo "::error::Invalid resume run ID"; exit 1; }
+            mkdir -p "$RUNNER_TEMP/story-resume"
+            gh run download "$RESUME_RUN" -R "$GITHUB_REPOSITORY" \
+              --name "anime-story-director-draft-v1-$RESUME_RUN" \
+              --dir "$RUNNER_TEMP/story-resume"
+            test -s "$RUNNER_TEMP/story-resume/story-draft-v1.json"
+            test -s "$RUNNER_TEMP/story-resume/source-plan.json"
+          fi
+
+      - name: Prepare or inherit source-bound episode plan
         if: matrix.rank == 0
+        shell: bash
         env:
           DIRECTOR_STORY_TEXT: ${{ inputs.story_text }}
           STORY_FILE: ${{ inputs.story_file }}
-          STORY_CLIPS: ${{ inputs.clips }}
+          STORY_SCENES: ${{ inputs.scenes }}
           STORY_FRAMES: ${{ inputs.frames }}
           STORY_FPS: ${{ inputs.fps }}
           STORY_STYLE: ${{ inputs.style }}
           STORY_CHARACTERS: ${{ inputs.character_ids }}
+          DIRECTOR_STAGE: ${{ inputs.stage }}
+          RESUME_RUN: ${{ inputs.resume_run }}
         run: |
-          python3 scripts/story-director/director-v1.py prepare --model "$STORY_MODEL" --story-file "$STORY_FILE" --clips "$STORY_CLIPS" --frames "$STORY_FRAMES" --fps "$STORY_FPS" --style "$STORY_STYLE" --characters "$STORY_CHARACTERS" --output "$RUNNER_TEMP/story-input/source-plan.json"
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/story-input"
+          if [ "$DIRECTOR_STAGE" = scene ]; then
+            cp "$RUNNER_TEMP/story-episode/source-plan.json" "$RUNNER_TEMP/story-input/source-plan.json"
+          elif [ -n "$RESUME_RUN" ]; then
+            cp "$RUNNER_TEMP/story-resume/source-plan.json" "$RUNNER_TEMP/story-input/source-plan.json"
+          else
+            python3 scripts/story-director/director-v1.py prepare \
+              --model "$STORY_MODEL" --story-file "$STORY_FILE" --scenes "$STORY_SCENES" \
+              --frames "$STORY_FRAMES" --fps "$STORY_FPS" \
+              --style "$STORY_STYLE" --characters "$STORY_CHARACTERS" \
+              --output "$RUNNER_TEMP/story-input/source-plan.json"
+          fi
 
       - name: Reclaim disposable SDKs on model-loading coordinator
         if: matrix.rank == 0
@@ -238,17 +302,37 @@ jobs:
           done
           if [ "$ready" != 1 ]; then echo "::error::Distributed llama.cpp failed to become ready"; tail -n 60 "$RUNNER_TEMP/story-llama-server.log"; exit 1; fi
 
-      - name: Generate human-review draft from selected AI on four runners
+      - name: Generate episode outline or per-scene clip draft on four runners
         if: matrix.rank == 0
+        shell: bash
+        env:
+          DIRECTOR_STAGE: ${{ inputs.stage }}
+          DIRECTOR_SCENE_INDEX: ${{ inputs.scene_index }}
+          RESUME_RUN: ${{ inputs.resume_run }}
         run: |
-          python3 scripts/story-director/director-v1.py infer --model "$STORY_MODEL" --plan "$RUNNER_TEMP/story-input/source-plan.json" --provenance "$RUNNER_TEMP/story-model/model-provenance-v1.json" --output "$RUNNER_TEMP/story-output/story-draft-v1.json"
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/story-output"
+          args=(--model "$STORY_MODEL" --stage "$DIRECTOR_STAGE" \
+            --plan "$RUNNER_TEMP/story-input/source-plan.json" \
+            --provenance "$RUNNER_TEMP/story-model/model-provenance-v1.json" \
+            --output "$RUNNER_TEMP/story-output/story-draft-v1.json")
+          if [ "$DIRECTOR_STAGE" = scene ]; then
+            args+=(--scene-index "$DIRECTOR_SCENE_INDEX" \
+                   --outline "$RUNNER_TEMP/story-episode/story-draft-v1.json")
+          fi
+          if [ -n "$RESUME_RUN" ]; then
+            args+=(--resume-draft "$RUNNER_TEMP/story-resume/story-draft-v1.json")
+          fi
+          python3 scripts/story-director/director-v1.py infer "${args[@]}"
 
       - name: Upload draft, not an approved production plan
         if: matrix.rank == 0
         uses: actions/upload-artifact@v4
         with:
           name: anime-story-director-draft-v1-${{ github.run_id }}
-          path: ${{ runner.temp }}/story-output/story-draft-v1.json
+          path: |
+            ${{ runner.temp }}/story-output/story-draft-v1.json
+            ${{ runner.temp }}/story-input/source-plan.json
           if-no-files-found: error
           retention-days: 14
 
@@ -256,5 +340,5 @@ jobs:
         if: matrix.rank == 0
         shell: bash
         run: |
-          echo "Story Director draft generated. NOT approved and no Wan rendering dispatched." >> "$GITHUB_STEP_SUMMARY"
+          echo "Story Director episode/scene draft generated. Unlimited creative scene/clip counts are processed in bounded, resumable inference batches; no Wan rendering dispatched." >> "$GITHUB_STEP_SUMMARY"
           echo "Source/model digests are included in the saved draft receipt." >> "$GITHUB_STEP_SUMMARY"
