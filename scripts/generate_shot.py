@@ -1,32 +1,54 @@
 #!/usr/bin/env python3
-"""Generate anime storyboard stills with Animagine XL 3.1 on CPU (v2).
+"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v3).
 
-One-shot/sequence continuity is planned by story.py. This module performs
-SDXL text-to-image or single-reference image-to-image inference only.
+Guidance is opt-in to preserve Phase 2's low-memory baseline:
+  base         one img2img reference or text-to-image
+  ip-adapter   multi-character/scene references, one SDXL IP-Adapter
+  controlnet   canny structural guide from saved scene layout or prior shot
+  both         both reference and structural conditioning (high RAM)
+Registered character LoRAs are loaded from canonical HF Hub repositories.
 """
 import argparse
 import json
 import os
 from pathlib import Path
-
 from PIL import Image, ImageFilter, ImageOps
 
 MODEL = "cagliostrolab/animagine-xl-3.1"
 MODEL_REVISION = "483f0c322568ed13697ed01dd0be07204746d12b"
+IP_ADAPTER_REPO = "h94/IP-Adapter"
+IP_WEIGHT = "ip-adapter-plus_sdxl_vit-h.safetensors"
+CONTROL_MODEL = "diffusers/controlnet-canny-sdxl-1.0"
 
 
 def fit_reference(image, width, height):
     source = Image.open(image).convert("RGB")
-    # Preserve all artwork rather than center-cropping portrait or landscape.
-    fitted = ImageOps.contain(
-        source, (width, height), method=Image.Resampling.LANCZOS
-    )
-    base = ImageOps.fit(source, (width, height), method=Image.Resampling.LANCZOS)
+    fitted = ImageOps.contain(source, (width, height), Image.Resampling.LANCZOS)
+    base = ImageOps.fit(source, (width, height), Image.Resampling.LANCZOS)
     base = base.filter(ImageFilter.GaussianBlur(radius=max(12, width // 36)))
-    base.paste(
-        fitted, ((width - fitted.width) // 2, (height - fitted.height) // 2)
-    )
+    base.paste(fitted, ((width - fitted.width) // 2, (height - fitted.height) // 2))
     return base
+
+
+def verified_image(root, item):
+    path = (root / item["path"]).resolve()
+    if not path.is_relative_to(root.resolve()) or not path.is_file():
+        raise ValueError(f"Reference is missing or unsafe: {item['path']}")
+    import hashlib
+    if hashlib.sha256(path.read_bytes()).hexdigest() != item["sha256"]:
+        raise ValueError(f"Reference has changed: {item['path']}")
+    return path
+
+
+def edge_guide(image):
+    # Saved role canny is treated as a preprocessed edge guide. For a
+    # layout/background illustration, compute actual Canny edges.
+    import cv2
+    import numpy as np
+    arr = np.asarray(image.convert("RGB"))
+    edges = cv2.Canny(arr, 100, 200)
+    stacked = np.repeat(edges[:, :, None], 3, axis=2)
+    return Image.fromarray(stacked, mode="RGB")
 
 
 def main():
@@ -37,12 +59,28 @@ def main():
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
     if plan.get("schema_version") != "v1":
         parser.error("Unsupported shot plan")
+    mode = plan.get("guidance_mode", "base")
+    if mode not in ("base", "ip-adapter", "controlnet", "both"):
+        parser.error("Unknown guidance mode")
 
-    # Imports happen after the manifest and referenced assets have been
-    # validated, so invalid shots fail before heavyweight model loading.
+    root = Path(__file__).resolve().parents[1]
+    use_ip = mode in ("ip-adapter", "both")
+    use_control = mode in ("controlnet", "both")
+    ip_refs = plan.get("ip_adapter_references", [])
+    if use_ip and not ip_refs:
+        parser.error("IP-Adapter requested, but chosen characters/scene have no reference images.")
+    # For ControlNet we can derive the edges from the prior selected shot,
+    # or fall back to an explicitly stored layout reference.
+    control_record = plan.get("control_reference")
+    if use_control and not (control_record or plan.get("conditioning_image")):
+        parser.error("ControlNet requested but no previous shot or scene layout reference exists.")
+
     import torch
     from diffusers import (
-        StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline,
+        ControlNetModel, StableDiffusionXLPipeline,
+        StableDiffusionXLImg2ImgPipeline,
+        StableDiffusionXLControlNetPipeline,
+        StableDiffusionXLControlNetImg2ImgPipeline,
         DPMSolverMultistepScheduler,
     )
 
@@ -50,18 +88,13 @@ def main():
     torch.set_num_interop_threads(1)
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-
     dtype = torch.bfloat16
-    print(
-        f"Loading {MODEL} on CPU using {dtype}; model files downloaded "
-        "from Hugging Face. The first run can require many GB of RAM/disk.",
-        flush=True,
-    )
+
+    print(f"Loading {MODEL} (CPU, {dtype}), guidance={mode}", flush=True)
     pipeline = StableDiffusionXLPipeline.from_pretrained(
-        MODEL, revision=MODEL_REVISION,
-        torch_dtype=dtype, use_safetensors=True, low_cpu_mem_usage=True,
-        add_watermarker=False,
-    ).to("cpu")
+        MODEL, revision=MODEL_REVISION, torch_dtype=dtype,
+        use_safetensors=True, low_cpu_mem_usage=True, add_watermarker=False,
+    )
     pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
         pipeline.scheduler.config, use_karras_sigmas=True
     )
@@ -69,41 +102,93 @@ def main():
     pipeline.enable_vae_tiling()
     pipeline.enable_attention_slicing(1)
 
-    root = Path(__file__).resolve().parents[1]
-    conditioning = plan.get("conditioning_image")
-    if conditioning:
-        path = root / conditioning
-        if not path.is_file():
-            raise RuntimeError(f"Conditioning image is missing: {conditioning}")
-        init_image = fit_reference(path, plan["width"], plan["height"])
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        init_image.save(args.output_dir / "conditioning_input.png")
-        img2img = StableDiffusionXLImg2ImgPipeline.from_pipe(pipeline)
-        active = img2img
-        print(
-            f"Using single-reference img2img: {conditioning}; "
-            f"strength={plan['strength']}. Additional references inform "
-            "text prompts only until multi-adapter Phase 3.",
-            flush=True,
+    # Use only explicit, registered LoRA repos. Do not silently infer weights
+    # from a free-form prompt or download a raw executable/pickle checkpoint.
+    lora_names = []
+    for number, item in enumerate(plan.get("character_loras", []), 1):
+        repo_id = item["repository"]
+        adapter_name = f"character_{number}"
+        pipeline.load_lora_weights(
+            repo_id, weight_name="pytorch_lora_weights.safetensors",
+            adapter_name=adapter_name,
+            use_safetensors=True,
         )
+        lora_names.append(adapter_name)
+    if lora_names:
+        pipeline.set_adapters(lora_names, adapter_weights=[0.75] * len(lora_names))
+        print(f"Loaded {len(lora_names)} registered character LoRA(s)", flush=True)
+
+    if use_ip:
+        from transformers import CLIPVisionModelWithProjection
+        # ViT-H image encoder matches the selected IP-Adapter Plus checkpoint.
+        encoder = CLIPVisionModelWithProjection.from_pretrained(
+            IP_ADAPTER_REPO, subfolder="models/image_encoder",
+            torch_dtype=dtype,
+        )
+        pipeline.image_encoder = encoder
+        pipeline.load_ip_adapter(
+            IP_ADAPTER_REPO, subfolder="sdxl_models",
+            weight_name=IP_WEIGHT,
+        )
+        pipeline.set_ip_adapter_scale(0.55)
+        print(f"IP-Adapter: {len(ip_refs)} saved character/scene references", flush=True)
+
+    if use_control:
+        controlnet = ControlNetModel.from_pretrained(
+            CONTROL_MODEL, torch_dtype=dtype, use_safetensors=True
+        )
+        if plan.get("conditioning_image"):
+            active = StableDiffusionXLControlNetImg2ImgPipeline.from_pipe(
+                pipeline, controlnet=controlnet
+            )
+        else:
+            active = StableDiffusionXLControlNetPipeline.from_pipe(
+                pipeline, controlnet=controlnet
+            )
+        print("Enabled SDXL Canny ControlNet", flush=True)
+    elif plan.get("conditioning_image"):
+        active = StableDiffusionXLImg2ImgPipeline.from_pipe(pipeline)
     else:
         active = pipeline
-        init_image = None
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        print("No visual references available; using text-to-image generation.", flush=True)
+    # On a CPU-only runner do not use CUDA offload; memory use may exceed 16 GiB
+    active.to("cpu")
 
-    prompt = plan["composed_prompt"]
-    negative_prompt = plan["composed_negative_prompt"]
-    if len(prompt) > 10000 or len(negative_prompt) > 10000:
-        raise ValueError("Composed prompt is too long")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    init_image = None
+    conditioning = plan.get("conditioning_image")
+    if conditioning:
+        source = (root / conditioning).resolve()
+        if not source.is_relative_to(root.resolve()) or not source.is_file():
+            raise RuntimeError(f"Invalid conditioning image: {conditioning}")
+        init_image = fit_reference(source, plan["width"], plan["height"])
+        init_image.save(args.output_dir / "conditioning_input.png")
+
+    ip_images = []
+    if use_ip:
+        for ref in ip_refs:
+            p = verified_image(root, ref)
+            ip_images.append(fit_reference(p, plan["width"], plan["height"]))
+        # One IP-Adapter loaded; its supported nested list is a set of
+        # image prompts, not multiple differently weighted adapter slots.
+        # Multiple same-adapter images are averaged, not spatially assigned.
+        ip_images = [ip_images] if len(ip_images) > 1 else ip_images[0]
+
+    canny = None
+    if use_control:
+        if control_record:
+            path = verified_image(root, control_record)
+            control_source = fit_reference(path, plan["width"], plan["height"])
+            canny = control_source if control_record["role"] == "canny" else edge_guide(control_source)
+        else:
+            canny = edge_guide(init_image)
+        canny.save(args.output_dir / "control_canny.png")
+
     for number in range(1, plan["candidates"] + 1):
         seed = plan["seed"] + number - 1
-        if seed >= 2**63:
-            raise ValueError("Seed is too large")
         generator = torch.Generator(device="cpu").manual_seed(seed)
         options = dict(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
+            prompt=plan["composed_prompt"],
+            negative_prompt=plan["composed_negative_prompt"],
             num_inference_steps=plan["steps"],
             guidance_scale=plan["cfg"],
             generator=generator,
@@ -112,18 +197,24 @@ def main():
         )
         if init_image is not None:
             options.update(image=init_image, strength=plan["strength"])
-        else:
+        elif not use_control:
             options.update(width=plan["width"], height=plan["height"])
-        print(
-            f"Generating candidate {number}/{plan['candidates']}, "
-            f"seed {seed}, {plan['width']}x{plan['height']}",
-            flush=True,
-        )
+        if canny is not None:
+            if init_image is not None:
+                options["control_image"] = canny
+            else:
+                options["image"] = canny
+                options.update(width=plan["width"], height=plan["height"])
+            options["controlnet_conditioning_scale"] = 0.65
+        if use_ip:
+            options["ip_adapter_image"] = ip_images
+        print(f"Generating candidate {number}/{plan['candidates']} "
+              f"with {mode}, seed={seed}", flush=True)
         with torch.inference_mode():
-            output = active(**options).images[0]
-        filename = args.output_dir / f"candidate-{number:02d}.png"
-        output.save(filename)
-        print(f"Created {filename}", flush=True)
+            image = active(**options).images[0]
+        destination = args.output_dir / f"candidate-{number:02d}.png"
+        image.save(destination)
+        print(f"Saved {destination}", flush=True)
 
 
 if __name__ == "__main__":
