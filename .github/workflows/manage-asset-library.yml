@@ -1,5 +1,5 @@
-# Manage persistent anime characters and scene packs (v1).
-name: Manage character and scene library (v1)
+# Manage persistent anime characters and scene packs (v2).
+name: Manage character and scene library (v2)
 
 on:
   workflow_dispatch:
@@ -76,6 +76,9 @@ jobs:
       - name: Update canonical pack and reference files
         env:
           LIB_OPERATION: ${{ inputs.operation }}
+          GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
+          GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
+          GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
           LIB_KIND: ${{ inputs.kind }}
           LIB_ID: ${{ inputs.asset_id }}
           LIB_NAME: ${{ inputs.name }}
