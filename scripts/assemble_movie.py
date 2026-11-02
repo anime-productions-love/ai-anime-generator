@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble ordered Wan/SVD GitHub Action scene clips into one film (v1)."""
+"""Assemble ordered Wan/SVD GitHub Action scene clips into one film (v2)."""
 
 import argparse
 import json
@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument("--width", type=int, default=480, help="Final canvas width (default portrait)")
     parser.add_argument("--height", type=int, default=832, help="Final canvas height (default portrait)")
     parser.add_argument("--fps", type=int, default=8, help="Movie playback rate")
-    parser.add_argument("--transition", choices=("cut", "fade-black"), default="cut")
+    parser.add_argument("--transition", choices=("cut", "fade-black", "motion-seam"), default="cut")
     parser.add_argument("--fade-seconds", type=float, default=0.3)
     parser.add_argument("--crf", type=int, default=20, help="H.264 quality: lower is better")
     args = parser.parse_args()
@@ -92,12 +92,19 @@ def main():
 
         # Preserve full original composition, even when source and movie
         # use different orientations. Black letterboxing is intentional.
-        filter_chain = [
+        filter_chain = []
+        if args.transition == "motion-seam" and index > 0:
+            # The first frame of every successor was derived from the exact
+            # prior last frame. Remove its redundant boundary frame to avoid
+            # a perceptible freeze before optical-flow interpolation.
+            filter_chain.extend(["select=not(eq(n\\,0))",
+                                 f"setpts=N/({args.fps}*TB)"])
+        filter_chain.extend([
             f"scale={args.width}:{args.height}:force_original_aspect_ratio=decrease",
             f"pad={args.width}:{args.height}:(ow-iw)/2:(oh-ih)/2:black",
             f"fps={args.fps}",
             "setsar=1", "format=yuv420p",
-        ]
+        ])
         fade = min(args.fade_seconds, info["duration"] / 3)
         if args.transition == "fade-black" and fade > 0:
             if index > 0:
@@ -148,6 +155,10 @@ def main():
         "ordered_run_ids": args.run_ids,
         "width": args.width, "height": args.height,
         "fps": args.fps, "transition": args.transition,
+        "seam_handling": ("duplicate boundary frames removed; optical-flow "
+                          "smoothing runs as separate postprocess"
+                          if args.transition == "motion-seam" else
+                          "original frame joins"),
         "fade_seconds": args.fade_seconds if args.transition == "fade-black" else 0,
         "audio": "No audio. Scene audio is not included in this v1 combiner.",
         "duration_seconds": round(final_info["duration"], 3),
