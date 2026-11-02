@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload a finished SDXL LoRA to a private HF model repo and verify presence (v1)."""
+"""Upload a finished SDXL LoRA to a private HF model repo and verify presence (v2)."""
 import argparse
 import os
 import re
@@ -26,6 +26,14 @@ def main():
         parser.error("GitHub secret HF_TOKEN required for model upload and later inference")
     api = HfApi(token=token)
     api.create_repo(repo_id=repo_id, repo_type="model", private=True, exist_ok=True)
+    # create_repo(exist_ok=True) does not make an existing public repo private.
+    # Never accidentally publish a character's private LoRA weights.
+    before = api.model_info(repo_id, files_metadata=False)
+    if not before.private:
+        parser.error(
+            "Destination model repository is public. Choose a new private repo "
+            "or manually make this one private before uploading."
+        )
     api.upload_file(
         path_or_fileobj=str(args.weights), path_in_repo="pytorch_lora_weights.safetensors",
         repo_id=repo_id, repo_type="model", commit_message="Publish character LoRA weights v1",
