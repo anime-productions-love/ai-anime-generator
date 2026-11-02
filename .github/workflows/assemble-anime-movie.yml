@@ -1,0 +1,130 @@
+# Compose already-generated Wan 2.2 / SVD-XT clip artifacts (v2).
+name: Assemble anime movie from scenes (v2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scene_runs:
+        description: "Scene run IDs in playback order, separated by commas or spaces"
+        type: string
+        required: true
+      width:
+        description: "Final movie width (480 for portrait; 832 for landscape)"
+        type: number
+        default: 480
+        required: true
+      height:
+        description: "Final movie height (832 for portrait; 480 for landscape)"
+        type: number
+        default: 832
+        required: true
+      fps:
+        description: "Final movie FPS, 1-60"
+        type: number
+        default: 8
+        required: true
+      transition:
+        description: "Hard cut or fade to/from black between scenes"
+        type: choice
+        default: cut
+        required: true
+        options:
+          - cut
+          - fade-black
+      fade_seconds:
+        description: "Fade duration in seconds when using fade-black"
+        type: string
+        default: "0.3"
+        required: true
+      quality_crf:
+        description: "H.264 quality CRF; lower means higher quality"
+        type: number
+        default: 20
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Check out movie assembly script
+        uses: actions/checkout@v4
+
+      - name: Check FFmpeg availability
+        run: |
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Download each scene from its generating run in specified order
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_IDS_INPUT: ${{ inputs.scene_runs }}
+        run: |
+          set -euo pipefail
+          mapfile -t run_ids < <(
+            python3 -c 'import os,re; print("\n".join(x for x in re.split(r"[\s,;]+", os.environ["RUN_IDS_INPUT"].strip()) if x))'
+          )
+          if [ "${#run_ids[@]}" -eq 0 ]; then
+            echo "::error::Supply one or more GitHub Actions run IDs."
+            exit 1
+          fi
+          number=0
+          mkdir -p scene-inputs
+          for id in "${run_ids[@]}"; do
+            if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+              echo "::error::Invalid run ID: $id"
+              exit 1
+            fi
+            artifact_names="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | .name')"
+            mapfile -t matches < <(
+              printf '%s\n' "$artifact_names" |
+                grep -E "^((wan22-turbo)|(svd-xt))-v[0-9]+-$id$" || true
+            )
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::Run $id must have exactly one unexpired Wan/SVD video artifact; found ${#matches[@]}."
+              exit 1
+            fi
+            number=$((number + 1))
+            destination="$(printf 'scene-inputs/%04d' "$number")"
+            mkdir -p "$destination"
+            echo "Scene $number: downloading artifact ${matches[0]} from run $id"
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --name "${matches[0]}" --dir "$destination"
+            echo "Downloaded scene $number: $destination"
+          done
+
+      - name: Assemble movie without cropping original scenes
+        env:
+          RUN_IDS_INPUT: ${{ inputs.scene_runs }}
+          MOVIE_WIDTH: ${{ inputs.width }}
+          MOVIE_HEIGHT: ${{ inputs.height }}
+          MOVIE_FPS: ${{ inputs.fps }}
+          MOVIE_TRANSITION: ${{ inputs.transition }}
+          MOVIE_FADE_SECONDS: ${{ inputs.fade_seconds }}
+          MOVIE_CRF: ${{ inputs.quality_crf }}
+        run: |
+          python3 -u scripts/assemble_movie.py \
+            --scene-dir scene-inputs \
+            --output-dir outputs/movie \
+            --run-ids "$RUN_IDS_INPUT" \
+            --width "$MOVIE_WIDTH" \
+            --height "$MOVIE_HEIGHT" \
+            --fps "$MOVIE_FPS" \
+            --transition "$MOVIE_TRANSITION" \
+            --fade-seconds "$MOVIE_FADE_SECONDS" \
+            --crf "$MOVIE_CRF"
+
+      - name: Upload finished anime movie and scene timeline
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-movie-v2-${{ github.run_id }}
+          path: |
+            outputs/movie/movie.mp4
+            outputs/movie/timeline.json
+          if-no-files-found: error
+          retention-days: 7
