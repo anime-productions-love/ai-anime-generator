@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve a generation source from an image, previous scene, or video URL (v3).
+"""Resolve a generation source from an image, previous scene, or video URL (v4).
 
 Use the most recent *successful same-workflow* run with an unexpired artifact
 for automatic continuation; never select the current run or another model.
@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 from gallery_source import fetch_gallery_bytes
+from prepare_input import detected_format, MAX_BYTES as MAX_IMAGE_BYTES
 
 WORKFLOWS = {
     "generate-svd-xt.yml": "svd-xt",
@@ -190,7 +191,7 @@ def extract_last_video_frame(video_file, destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--source-mode", choices=("image", "continue-last", "video-url"),
+        "--source-mode", choices=("auto", "image", "continue-last", "video-url"),
         required=True,
     )
     parser.add_argument(
@@ -218,14 +219,25 @@ def main():
                 args.current_run_id, args.output,
             )
         else:
+            # Accept either an image or a video in auto/video-url modes.
+            # This also makes historical video-url submissions containing
+            # gallery image links work rather than trying to decode JPG as MP4.
             if not args.input.strip():
-                parser.error("Video URL mode requires a direct video file URL.")
-            with tempfile.TemporaryDirectory(prefix="remote_video_") as directory:
-                video_file = Path(directory) / "video_input"
+                parser.error("Supply a gallery image/video URL or direct media file URL.")
+            with tempfile.TemporaryDirectory(prefix="remote_media_") as directory:
+                media_file = Path(directory) / "media_input"
                 frame = Path(directory) / "last_frame.png"
-                download_video(args.input.strip(), video_file)
-                extract_last_video_frame(video_file, frame)
-                shutil.copyfile(frame, args.output)
+                download_video(args.input.strip(), media_file)
+                with media_file.open("rb") as media:
+                    image_format = detected_format(media.read(16))
+                if image_format:
+                    if media_file.stat().st_size > MAX_IMAGE_BYTES:
+                        raise ValueError("Gallery image exceeds the 24 MiB image limit.")
+                    shutil.copyfile(media_file, args.output)
+                    print(f"Resolved {image_format} image source (no video decode required).", flush=True)
+                else:
+                    extract_last_video_frame(media_file, frame)
+                    shutil.copyfile(frame, args.output)
         if not args.output.is_file() or args.output.stat().st_size == 0:
             raise RuntimeError("No input image was resolved.")
         print(f"Prepared next scene's source image: {args.output}", flush=True)
