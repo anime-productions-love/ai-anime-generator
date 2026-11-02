@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chain multiple Wan video scenes across separate GitHub Actions runs (v4).
+"""Chain multiple Wan video scenes across separate GitHub Actions runs (v5).
 
 Each run is a single <=350-minute Wan job; ONLY the initial clip uses
 an external image, and each later clip uses the prior clip's last_frame.png. A form-generated JSON plan supplies prompts and one shared configuration.
@@ -81,7 +81,7 @@ def parse_config(path):
     data = json_read(path)
     if not isinstance(data, dict) or data.get("version") != "v2":
         fail("Sequence plan must be a JSON object with version='v2'")
-    if set(data) - {"version", "title", "initial_image", "settings", "prompts", "assembly"}:
+    if set(data) - {"version", "title", "initial_image", "settings", "prompts", "assembly", "postprocess"}:
         fail("Unknown sequence plan property")
     image = data.get("initial_image")
     if not isinstance(image, str) or not image.startswith("https://"):
@@ -102,8 +102,8 @@ def parse_config(path):
         fail("width and height must be multiples of 16")
     positive_int(settings["seed"], "seed", 0, 2147483647)
     prompts = data.get("prompts")
-    if not isinstance(prompts, list) or not 2 <= len(prompts) <= 17:
-        fail("Continuous sequence requires 2–17 written video prompts")
+    if not isinstance(prompts, list) or not 2 <= len(prompts) <= 33:
+        fail("Continuous sequence requires 2–33 written video prompts")
     for n, prompt in enumerate(prompts, 1):
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 5000:
             fail(f"Video prompt {n} must have 1–5000 characters")
@@ -127,11 +127,23 @@ def parse_config(path):
             or assembly["fps"] != settings["fps"]):
         fail("Movie assembly must preserve the same resolution and FPS as every clip")
     positive_int(assembly["quality_crf"], "assembly.quality_crf", 15, 35)
-    if assembly["transition"] != "cut":
-        fail("Continuous sequence assembly only supports clean cuts")
+    if assembly["transition"] not in ("cut", "motion-seam"):
+        fail("Continuous sequence assembly supports clean cut or motion-seam")
     if str(assembly["fade_seconds"]) not in ("0", "0.0"):
         fail("Continuous sequence cuts require fade_seconds=0")
     assembly["fade_seconds"] = "0"
+    postprocess = data.get("postprocess", {
+        "method": "motion", "target_fps": 24, "speed": 1.5,
+    })
+    if not isinstance(postprocess, dict) or set(postprocess) != {
+        "method", "target_fps", "speed"
+    }:
+        fail("postprocess must set method, target_fps and speed")
+    if postprocess["method"] not in ("motion", "rife"):
+        fail("postprocess method must be motion or rife")
+    positive_int(postprocess["target_fps"], "postprocess.target_fps", 8, 60)
+    if postprocess["speed"] not in (0.75, 1, 1.0, 1.25, 1.5, 2, 2.0, 3, 3.0, 4, 4.0):
+        fail("postprocess speed is unsupported")
     return data, resolved, assembly
 
 
@@ -167,6 +179,9 @@ def prepare(args):
         "scene": spec,
         "initial_image": data["initial_image"],
         "assembly": assembly,
+        "postprocess": data.get("postprocess", {
+            "method": "motion", "target_fps": 24, "speed": 1.5,
+        }),
     }
     write_json(args.output, result)
     print(f"Prepared chain {chain_id} scene {index}/{len(clips)} "
@@ -371,6 +386,9 @@ def advance(args):
             "fps": str(assembly["fps"]), "transition": assembly["transition"],
             "fade_seconds": assembly["fade_seconds"],
             "quality_crf": str(assembly["quality_crf"]),
+            "postprocess_method": plan["postprocess"]["method"],
+            "postprocess_fps": str(plan["postprocess"]["target_fps"]),
+            "postprocess_speed": str(plan["postprocess"]["speed"]),
         }, repo, ref)
         print(f"All {plan['total']} clips generated. Final movie assembly dispatched.", flush=True)
     else:
