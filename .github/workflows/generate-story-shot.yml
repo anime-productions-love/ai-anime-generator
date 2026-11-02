@@ -1,5 +1,5 @@
-# Generate first/next anime storyboard shot with Phase 3 identity and layout guidance (v2).
-name: Generate or continue anime story shot (v2)
+# Generate first/next anime storyboard shot with Phase 3 identity and layout guidance (v3).
+name: Generate or continue anime story shot (v3)
 
 on:
   workflow_dispatch:
@@ -125,7 +125,7 @@ jobs:
         run: python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
 
       - name: Install pinned image-generation dependencies
-        run: python -m pip install --no-cache-dir -r requirements-image-v1.txt
+        run: python -m pip install --no-cache-dir -r requirements-image-v2.txt
 
       - name: Generate anime story candidate image(s)
         env:
@@ -168,7 +168,7 @@ jobs:
       - name: Upload generated shots and reproducibility plan
         uses: actions/upload-artifact@v4
         with:
-          name: anime-story-shot-v2-${{ github.run_id }}
+          name: anime-story-shot-v3-${{ github.run_id }}
           path: |
             work/candidates/
             work/shot-plan.json
