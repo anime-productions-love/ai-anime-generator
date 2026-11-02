@@ -1,0 +1,71 @@
+# Choose a saved candidate as the canonical image for an existing story shot (v1).
+name: Select canonical anime story image (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      story_id:
+        description: "Saved story ID"
+        type: string
+        required: true
+      sequence_id:
+        description: "Saved sequence ID"
+        type: string
+        required: true
+      shot_id:
+        description: "Four-digit shot number, e.g. 0001"
+        type: string
+        required: true
+      candidate:
+        description: "Which previously generated image should become canonical?"
+        type: number
+        required: true
+        default: 1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  choose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out shot history
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Change the selected candidate without running AI again
+        env:
+          STORY: ${{ inputs.story_id }}
+          SEQUENCE: ${{ inputs.sequence_id }}
+          SHOT: ${{ inputs.shot_id }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          python3 scripts/story.py select \
+            --story-id "$STORY" \
+            --sequence-id "$SEQUENCE" \
+            --shot-id "$SHOT" \
+            --candidate "$CANDIDATE"
+
+      - name: Save new canonical selection
+        env:
+          STORY: ${{ inputs.story_id }}
+          SEQUENCE: ${{ inputs.sequence_id }}
+          SHOT: ${{ inputs.shot_id }}
+        run: |
+          set -euo pipefail
+          git add -- stories
+          if git diff --cached --quiet; then
+            echo "The requested candidate was already canonical."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Story selection v1: $STORY/$SEQUENCE/$SHOT"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
