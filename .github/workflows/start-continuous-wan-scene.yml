@@ -1,11 +1,11 @@
-# Start ONE uninterrupted Wan sequence: exactly 25 native GitHub form inputs (v1).
-name: Start continuous Wan anime scene (2-17 videos) (v1)
+# Start ONE uninterrupted Wan sequence: exactly 25 native GitHub form inputs (v2).
+name: Start continuous Wan anime scene (2-15 videos) (v2)
 
 on:
   workflow_dispatch:
     inputs:
       video_count:
-        description: "Number of consecutive clips. Fill prompt boxes 1 through this number."
+        description: "2–15 consecutive clips with separate written motion prompts."
         type: choice
         required: true
         default: "2"
@@ -24,8 +24,6 @@ on:
           - "13"
           - "14"
           - "15"
-          - "16"
-          - "17"
       start_image:
         description: "ONLY the first image; supports private gallery blob/commit URLs"
         type: string
@@ -64,6 +62,27 @@ on:
         type: number
         required: true
         default: 42
+      finish_preset:
+        description: "Automatic final frame smoothing and speed (one setting for whole movie)"
+        type: choice
+        required: true
+        default: motion-24fps-1.5x
+        options:
+          - motion-24fps-1.0x
+          - motion-24fps-1.5x
+          - motion-24fps-2.0x
+          - motion-30fps-1.0x
+          - motion-30fps-1.5x
+          - rife-24fps-1.0x
+          - rife-24fps-1.5x
+      seam_mode:
+        description: "Smooth transition between clips by removing duplicate shared frame"
+        type: choice
+        required: true
+        default: motion-seam
+        options:
+          - motion-seam
+          - cut
       video_01_prompt:
         description: "Video 1 motion and camera instructions (always required)"
         type: string
@@ -124,14 +143,6 @@ on:
         description: "Video 15 motion and camera instructions"
         type: string
         required: false
-      video_16_prompt:
-        description: "Video 16 motion and camera instructions"
-        type: string
-        required: false
-      video_17_prompt:
-        description: "Video 17 motion and camera instructions"
-        type: string
-        required: false
 
 permissions:
   contents: write
@@ -162,6 +173,8 @@ jobs:
           FPS: ${{ inputs.fps }}
           FRAME_SIZE: ${{ inputs.frame_size }}
           SEED: ${{ inputs.seed }}
+          FINISH_PRESET: ${{ inputs.finish_preset }}
+          SEAM_MODE: ${{ inputs.seam_mode }}
           PROMPT_01: ${{ inputs.video_01_prompt }}
           PROMPT_02: ${{ inputs.video_02_prompt }}
           PROMPT_03: ${{ inputs.video_03_prompt }}
@@ -177,8 +190,6 @@ jobs:
           PROMPT_13: ${{ inputs.video_13_prompt }}
           PROMPT_14: ${{ inputs.video_14_prompt }}
           PROMPT_15: ${{ inputs.video_15_prompt }}
-          PROMPT_16: ${{ inputs.video_16_prompt }}
-          PROMPT_17: ${{ inputs.video_17_prompt }}
         run: |
           python3 scripts/wan_sequence_form.py --run-id "$GITHUB_RUN_ID"
 
