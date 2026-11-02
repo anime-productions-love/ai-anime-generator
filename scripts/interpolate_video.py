@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smooth existing Wan/SVD videos via RIFE CPU AI or FFmpeg optical flow (v1).
+"""Smooth existing Wan/SVD videos via RIFE CPU AI or FFmpeg optical flow (v2).
 
 Independent post-production: does not rerun AI diffusion. Source can be a
 successful run in the unified/legacy repository or a private-gallery URL.
@@ -20,7 +20,7 @@ from resolve_scene_input import download_video
 
 CURRENT = "anime-productions-love/ai-anime-generator"
 LEGACY = "anime-productions-love/ai-video-generator"
-ARTIFACT = re.compile(r"(?:wan22-turbo|svd-xt)-v[0-9]+-([0-9]+)")
+ARTIFACT = re.compile(r"(?:wan22-turbo|svd-xt|anime-movie)-v[0-9]+-([0-9]+)")
 MAX_SOURCE_FRAMES = 600
 MAX_OUTPUT_FRAMES = 2400
 
@@ -81,7 +81,7 @@ def get_run_video(run_id, source_repo, directory):
             continue
         if len(matches) != 1:
             raise ValueError(
-                f"Run {repo}/{run_id} has multiple matching Wan/SVD artifacts; "
+                f"Run {repo}/{run_id} has multiple matching video artifacts; "
                 "select an unambiguous completed run."
             )
         unpack = directory / "download"
@@ -101,7 +101,7 @@ def get_run_video(run_id, source_repo, directory):
             "artifact_name": matches[0]["name"],
         }
     raise RuntimeError(
-        f"Could not find an unexpired Wan/SVD artifact for run {run_id}. "
+        f"Could not find an unexpired Wan/SVD/movie artifact for run {run_id}. "
         "If it expired, use a direct downloadable video URL instead."
     )
 
