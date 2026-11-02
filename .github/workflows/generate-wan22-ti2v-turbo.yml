@@ -1,20 +1,21 @@
-# Wan2.2 TI2V-5B Turbo, four-step GGUF: CPU-only public GitHub runner (v4).
-name: Generate Wan 2.2 Turbo anime scene (v4)
+# Wan2.2 TI2V-5B Turbo, four-step GGUF: CPU-only public GitHub runner (v5).
+name: Generate Wan 2.2 Turbo anime scene (v5)
 
 on:
   workflow_dispatch:
     inputs:
       source_mode:
-        description: "Start with an image, continue latest Wan scene, or use video URL"
+        description: "Auto-detect gallery image/video URLs; or continue the last Wan clip"
         type: choice
         required: true
-        default: image
+        default: auto
         options:
+          - auto
           - image
           - continue-last
           - video-url
       image:
-        description: "Direct image URL/repo path OR video URL; ignored for continue-last"
+        description: "Gallery file or commit URL, direct image/video URL; ignored for continue-last"
         type: string
         required: false
         default: "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/svd/rocket.png"
@@ -83,6 +84,10 @@ jobs:
           GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
           GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
           GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GALLERY_PAT: ${{ secrets.GALLERY_PAT }}
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
           SOURCE_MODE: ${{ inputs.source_mode }}
           INPUT_URL: ${{ inputs.image }}
           REPOSITORY: ${{ github.repository }}
@@ -162,7 +167,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: wan22-turbo-v4-${{ github.run_id }}
+          name: wan22-turbo-v5-${{ github.run_id }}
           path: outputs/wan22/
           if-no-files-found: error
           retention-days: 7
