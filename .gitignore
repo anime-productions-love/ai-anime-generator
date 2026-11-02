@@ -1,0 +1,15 @@
+# Anime Story Generator v1 — keep durable reference images in Git.
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+outputs/
+.cache/
+models/
+*.ckpt
+*.safetensors
+*.gguf
+*.ip-adapter
+*.ip-adapter-embeds
+.DS_Store
