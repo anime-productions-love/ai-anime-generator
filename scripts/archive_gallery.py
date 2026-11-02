@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Archive complete anime workflow outputs in PRIVATE gallery GitHub Releases (v1).
+"""Archive complete anime workflow outputs in PRIVATE gallery GitHub Releases (v2).
 
 The archive is not an expiring Actions artifact. Each source workflow run gets
 its own release tag and a ZIP containing every file in the designated outputs.
@@ -48,7 +48,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--kind", required=True, choices=(
-        "wan", "movie", "enhanced", "comic", "storyboard"
+        "wan", "movie", "enhanced", "comic", "storyboard", "story-director"
     ))
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--out", type=Path, default=Path("work/gallery-archive"))
