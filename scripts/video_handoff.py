@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Export or dispatch one canonical storyboard image to existing video workflows (v2).
+"""Export or dispatch one canonical storyboard image to existing video workflows (v3).
 
-Dispatch is opt-in and requires a token with Actions:write on the target
-anime video repository. API dispatch acceptance does NOT mean video generated.
+Dispatch is opt-in and uses the built-in GITHUB_TOKEN with Actions:write
+on this same unified anime repository. Acceptance does NOT mean video generated.
 """
 import argparse
 import hashlib
