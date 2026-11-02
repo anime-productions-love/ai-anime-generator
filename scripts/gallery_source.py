@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read image/video links from the specific private anime gallery via GitHub API (v3).
+"""Read image/video links from the specific private anime gallery via GitHub API (v4).
 
 Only URLs referring to anime-productions-love/gallery can receive the gallery
 fine-grained PAT. Other image/video hosts use their existing public download
@@ -73,17 +73,17 @@ def fetch_gallery_bytes(url, max_bytes=MAX_REPO_FILE):
     source = parse_gallery_url(url)
     if source is None:
         return None
-    token = (os.environ.get("GITHUB_FINE_GRAINED_TOKEN")
+    token = (os.environ.get("VIDEO_REPO_TOKEN")
+             or os.environ.get("GITHUB_FINE_GRAINED_TOKEN")
              or os.environ.get("GALLERY_REPO_TOKEN")
              or os.environ.get("GALLERY_TOKEN")
              or os.environ.get("GITHUB_PAT")
              or os.environ.get("GH_PAT")
-             or os.environ.get("GALLERY_PAT")
-             or os.environ.get("VIDEO_REPO_TOKEN"))
+             or os.environ.get("GALLERY_PAT"))
     if not token:
         raise ValueError(
             "Private gallery URL requires a GitHub Actions secret "
-            "GITHUB_FINE_GRAINED_TOKEN (or GALLERY_REPO_TOKEN). "
+            "VIDEO_REPO_TOKEN (also accepts GITHUB_FINE_GRAINED_TOKEN). "
             "The fine-grained token must include anime-productions-love/gallery "
             "with Contents: read permission."
         )
