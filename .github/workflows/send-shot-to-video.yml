@@ -1,5 +1,5 @@
-# Optional bridge from verified selected anime shot to existing Wan/SVD workflows (v1).
-name: Export or send selected anime shot to video generator (v1)
+# Optional bridge from verified selected anime shot to existing Wan/SVD workflows (v2).
+name: Export or send selected anime shot to video generator (v2)
 
 on:
   workflow_dispatch:
@@ -59,6 +59,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: anime-library-writes-${{ github.ref }}
@@ -79,7 +80,7 @@ jobs:
       HEIGHT: ${{ inputs.height }}
       FRAMES: ${{ inputs.frames }}
       FPS: ${{ inputs.fps }}
-      VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout saved sequence and canonical selected image
         uses: actions/checkout@v4
@@ -130,5 +131,5 @@ jobs:
               echo "- Dispatch: Not requested"
             fi
             echo "- Receipt: stories/$STORY/sequences/$SEQUENCE/video-handoffs/handoff-$GITHUB_RUN_ID.json"
-            echo "- Video workflow: https://github.com/anime-productions-love/ai-video-generator/actions"
+            echo "- Video workflow: https://github.com/anime-productions-love/ai-anime-generator/actions"
           } >> "$GITHUB_STEP_SUMMARY"
