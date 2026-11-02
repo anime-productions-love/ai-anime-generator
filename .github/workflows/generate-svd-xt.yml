@@ -1,0 +1,145 @@
+# Free public-repository CPU workflow for SVD-XT (v8).
+name: Generate SVD-XT video (v8)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_mode:
+        description: "Start from an image, latest successful SVD clip, or video URL"
+        required: true
+        type: choice
+        default: image
+        options:
+          - image
+          - continue-last
+          - video-url
+      image:
+        description: "Image URL/repo path, OR direct video URL; ignored for continue-last"
+        required: false
+        type: string
+        default: "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/svd/rocket.png"
+      fit_mode:
+        description: "Framing: keep all original image content, or crop"
+        required: true
+        type: choice
+        default: "contain-blur"
+        options:
+          - "contain-blur"
+          - "contain"
+          - "crop"
+      frames:
+        description: "Positive number of frames (above 25 experimental; may exceed RAM)"
+        required: true
+        type: number
+        default: 25
+      steps:
+        description: "Diffusion steps (higher usually improves quality but costs CPU time)"
+        required: true
+        type: number
+        default: 25
+      precision:
+        description: "CPU precision (bf16 is experimental and uses less memory)"
+        required: true
+        type: choice
+        default: "bf16"
+        options:
+          - "bf16"
+          - "fp32"
+      seed:
+        description: "Random seed"
+        required: true
+        type: number
+        default: 42
+      fps:
+        description: "Output MP4 frames per second"
+        required: true
+        type: number
+        default: 6
+      motion_bucket_id:
+        description: "Motion amount, 1-255"
+        required: true
+        type: number
+        default: 180
+      noise_aug_strength:
+        description: "Image noise augmentation, 0-1"
+        required: true
+        type: string
+        default: "0.02"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      HF_HOME: /tmp/huggingface
+      HF_XET_CHUNK_CACHE_SIZE_BYTES: "0"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Resolve image, last successful SVD frame, or direct video URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
+          GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
+          GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
+          SOURCE_MODE: ${{ inputs.source_mode }}
+          INPUT_URL: ${{ inputs.image }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 scripts/resolve_scene_input.py \
+            --source-mode "$SOURCE_MODE" \
+            --input "$INPUT_URL" \
+            --workflow-file generate-svd-xt.yml \
+            --repository "$REPOSITORY" \
+            --current-run-id "$CURRENT_RUN_ID" \
+            --output inputs/downloaded_image
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only PyTorch
+        run: python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+
+      - name: Install Hugging Face Diffusers dependencies
+        run: python -m pip install --no-cache-dir -r requirements-video-v1.txt
+
+      - name: Generate SVD-XT clip
+        env:
+          INPUT_FIT_MODE: ${{ inputs.fit_mode }}
+          INPUT_FRAMES: ${{ inputs.frames }}
+          INPUT_STEPS: ${{ inputs.steps }}
+          INPUT_PRECISION: ${{ inputs.precision }}
+          INPUT_SEED: ${{ inputs.seed }}
+          INPUT_FPS: ${{ inputs.fps }}
+          INPUT_MOTION: ${{ inputs.motion_bucket_id }}
+          INPUT_NOISE: ${{ inputs.noise_aug_strength }}
+        run: |
+          python -u scripts/generate.py \
+            --image inputs/downloaded_image \
+            --fit-mode "$INPUT_FIT_MODE" \
+            --frames "$INPUT_FRAMES" \
+            --steps "$INPUT_STEPS" \
+            --precision "$INPUT_PRECISION" \
+            --seed "$INPUT_SEED" \
+            --fps "$INPUT_FPS" \
+            --motion-bucket-id "$INPUT_MOTION" \
+            --noise-aug-strength "$INPUT_NOISE" \
+            --decode-chunk-size 1 \
+            --output-dir outputs
+
+      - name: Upload generated MP4 and final frame
+        uses: actions/upload-artifact@v4
+        with:
+          name: svd-xt-v8-${{ github.run_id }}
+          path: outputs/
+          if-no-files-found: error
+          retention-days: 7
