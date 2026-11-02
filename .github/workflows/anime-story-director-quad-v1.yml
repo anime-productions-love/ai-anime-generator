@@ -1,5 +1,5 @@
 # Four concurrent CPU workers, one model per draft; v1. Not a training workflow.
-name: Anime Story Director four-runner AI (v6)
+name: Anime Story Director four-runner AI (v7)
 on:
   workflow_dispatch:
     inputs:
@@ -335,6 +335,20 @@ jobs:
             ${{ runner.temp }}/story-input/source-plan.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Preserve episode and scene drafts permanently in private gallery
+        if: matrix.rank == 0
+        env:
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/story-archive"
+          cp "$RUNNER_TEMP/story-output/story-draft-v1.json" "$RUNNER_TEMP/story-archive/story-draft-v1.json"
+          cp "$RUNNER_TEMP/story-input/source-plan.json" "$RUNNER_TEMP/story-archive/source-plan.json"
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind story-director \
+            --source "$RUNNER_TEMP/story-archive"
 
       - name: Summarize disposition
         if: matrix.rank == 0
