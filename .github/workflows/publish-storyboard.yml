@@ -1,5 +1,5 @@
-# CPU-only comic page and storyboard archive assembly (v1).
-name: Publish anime comic pages and storyboard (v1)
+# CPU-only comic page and storyboard archive assembly (v2).
+name: Publish anime comic pages and storyboard (v2)
 
 on:
   workflow_dispatch:
@@ -101,10 +101,18 @@ jobs:
       - name: Upload comic CBZ and storyboard ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: anime-storyboard-v1-${{ github.run_id }}
+          name: anime-storyboard-v2-${{ github.run_id }}
           path: |
             work/production/comic-pages-v1.cbz
             work/production/storyboard-v1.zip
             work/production/export-info.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Archive all comic outputs permanently to private gallery
+        if: success()
+        env:
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+        run: |
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind comic --source work/production
