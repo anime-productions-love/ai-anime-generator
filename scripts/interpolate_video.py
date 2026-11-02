@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smooth existing Wan/SVD videos via RIFE CPU AI or FFmpeg optical flow (v3).
+"""Smooth existing Wan/SVD videos via RIFE CPU AI or FFmpeg optical flow (v4).
 
 Independent post-production: does not rerun AI diffusion. Source can be a
 successful run in the unified/legacy repository or a private-gallery URL.
@@ -278,7 +278,20 @@ def main():
             raise ValueError("Input exceeds the supported maximum 2048×2048")
         args.output_dir.mkdir(parents=True, exist_ok=True)
         target = args.output_dir / "video.mp4"
-        if args.method == "rife":
+        estimated_frames = int(info["nb_frames"]) if str(info.get("nb_frames", "")).isdigit() else int(
+            info["duration"] * info["fps"] + 0.5
+        )
+        expected_output = int(info["duration"] * args.target_fps / args.speed + 0.5)
+        if args.method == "rife" and (estimated_frames > MAX_SOURCE_FRAMES
+                                      or expected_output > MAX_OUTPUT_FRAMES):
+            # Long multi-minute scenes must never get stuck in CPU RIFE's
+            # full-frame in-memory path. Use streaming FFmpeg optical flow
+            # and record the actual fallback.
+            print("RIFE full-film limits exceeded; using streaming "
+                  "motion-compensated interpolation instead.", flush=True)
+            render_motion(source, args, target)
+            actual_method = "ffmpeg-motion-long-film-fallback"
+        elif args.method == "rife":
             actual_method = render_rife(source, args, workspace, info)
         else:
             render_motion(source, args, target)
