@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read image/video links from the specific private anime gallery via GitHub API (v1).
+"""Read image/video links from the specific private anime gallery via GitHub API (v2).
 
 Only URLs referring to anime-productions-love/gallery can receive the gallery
 fine-grained PAT. Other image/video hosts use their existing public download
@@ -30,7 +30,7 @@ def parse_gallery_url(url):
     parts = [urllib.parse.unquote(p) for p in parsed.path.strip("/").split("/")]
     host = parsed.hostname
     if host == "api.github.com":
-        if (len(parts) < 6 or parts[:3] != ["repos", "anime-productions-love", "gallery"]
+        if (len(parts) < 5 or parts[:3] != ["repos", "anime-productions-love", "gallery"]
                 or parts[3] != "contents"):
             return None
         repo_path = "/".join(parts[4:])
