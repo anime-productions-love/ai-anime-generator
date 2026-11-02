@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Git-backed character and scene library manager (v2).
+"""Git-backed character and scene library manager (v3).
 
 Python standard library only. Phase 1 stores durable reference images and
 reusable manifests; it does not train LoRAs or invoke an image generator.
@@ -280,7 +280,10 @@ def register_lora(args):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_id or ""):
         raise ValueError("--hub-repo must be namespace/repository on Hugging Face")
     data = read_pack("character", args.id)
-    new_ref = "hf://" + repo_id
+    revision = args.revision
+    if revision and not re.fullmatch(r"[a-f0-9]{40}", revision):
+        raise ValueError("--revision must be an immutable 40-character Hugging Face model commit")
+    new_ref = "hf://" + repo_id + ("@" + revision if revision else "")
     if data["adapters"]["character_lora"] == new_ref:
         print("Character LoRA already registered; no change")
         return
@@ -329,6 +332,7 @@ def main():
             p.add_argument("--id", required=True)
         if action == "register-lora":
             p.add_argument("--hub-repo", required=True)
+            p.add_argument("--revision")
         if action in ("create", "update", "add-reference"):
             p.add_argument("--image-url")
             p.add_argument("--file")
