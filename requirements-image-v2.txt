@@ -1,0 +1,4 @@
+# Anime Story Generator Phase 3 SDXL inference, ControlNet and LoRA, v2
+-r requirements-image-v1.txt
+peft==0.17.1
+opencv-python-headless==4.12.0.88
