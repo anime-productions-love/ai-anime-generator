@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Four-runner Anime Story Director: verified models and draft-only inference (v2).
+"""Four-runner Anime Story Director: verified models and draft-only episode planning (v3).
 
 No training, no production dispatch and no unapproved model-authored writes.
 The workflow calls prepare/download/infer in order; model weights are sourced
@@ -19,36 +19,42 @@ ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "scripts/story-director/models-v1.json"
 MAX_STORY = 16_000
 
-CREATIVE = """You are a specialized anime screenwriter and creative director.
-Faithfully adapt the supplied story; preserve character motivations, dialogue
-intention, pacing, emotional beats, and continuity. Propose vivid but physically
-achievable short continuous clips. Output ONE valid JSON object only with:
-summary (string), character_bible (object), environment_bible (object),
-continuity_notes (array of strings), clips (array of exactly N objects with
-index (integer 1..N), prompt (string), narrative_goal (string)).
-Each clip continues from the LAST FRAME of the preceding clip. Do not
-invent new starting images, camera cuts, technical settings or characters that
-contradict the story. All clips share identical technical generation settings.
-You only propose a draft; a human must approve before rendering."""
+CREATIVE = """You are a creative anime series director. Preserve the supplied story,
+character arcs, emotional motivations, pacing, and artistic identity. Propose
+a coherent episode, with as many scenes as the storytelling needs."""
+PRODUCTION = """You are an anime episode production director. Build realistic,
+connected scenes for continuous Wan image-to-video clips. A new scene may begin
+with its own approved image and new framing, but successive clips WITHIN a
+scene inherit the exact final frame of the preceding clip. Never conflate a
+scene boundary with an internal clip boundary."""
+EFFICIENT = """You are an anime episode planner who preserves narrative
+quality while making shot duration and motion achievable on CPU-rendered Wan.
+Estimate shot counts from actions and pacing, never from arbitrary quotas."""
 
-PRODUCTION = """You are an anime production director. Optimize a narrative
-for fixed-configuration Wan2.2 continuous image-to-video generation. Preserve
-original story and character identity. Every successor begins from the
-previous video final frame. No new image sources or changes in technical
-settings. Output ONE JSON object with keys: summary (string),
-character_bible (object), environment_bible (object),
-continuity_notes (array of strings), clips (array of exactly N objects each
-with index 1..N, prompt, narrative_goal). Fit motion to clip duration.
-Do not claim you reviewed unseen video. Draft requires human approval."""
+OUTLINE_SYSTEM = """Return exactly ONE JSON OBJECT with:
+title (string), logline (string), character_bible (object),
+environment_bible (object), episode_continuity (array of strings),
+scenes (array of next ordered scene objects), has_more (boolean).
+Each scene has index (starting at the supplied next index), title,
+narrative_goal, location, characters (array), starting_image_brief,
+transition_from_previous, continuity_instructions, clip_count (positive
+integer). Include at most BATCH_SIZE scenes in this response, continuing
+the story naturally from the prior outline. NO hard upper bound on total
+scenes or clips. Set has_more=true ONLY when there are actually more
+story beats requiring additional scenes. Do not write every clip prompt yet.
+The starting image for each scene must be selected/approved by a human.
+Do not fabricate an existing image or send production instructions."""
 
-EFFICIENT = """You are a resource-conscious anime production planner.
-Generate precise feasible motion/camera instructions for a fixed technical
-Wan video configuration and preceding-frame-only continuation. Budget action
-complexity to exact clip duration. Output ONE JSON object with keys:
-summary, character_bible, environment_bible, continuity_notes, clips.
-clips must contain exactly N objects each with index, prompt, narrative_goal.
-This draft requires human approval; do not dispatch rendering."""
-
+SCENE_SYSTEM = """Return exactly ONE JSON OBJECT with:
+scene_index (integer), clips (array of the next ordered clip objects).
+Each clip includes index (starting at the given NEXT_CLIP), prompt (nonempty,
+concrete character/action/camera instructions), narrative_goal (nonempty).
+Produce exactly the requested BATCH_COUNT clips for THIS batch, preserving
+the scene's fixed location, characters and established continuity. The first
+clip of a scene uses its operator-approved initial image; every successor
+inherits the preceding verified final frame, even across technical batches.
+No new starting images or camera cuts within one continuous scene.
+Never claim an image has already been approved. This is a draft only."""
 
 def write_json(path, data):
     p = Path(path)
@@ -87,18 +93,19 @@ def prepare(args):
     else:
         story = os.environ.get("DIRECTOR_STORY_TEXT", "")
     story = story.strip()
-    if not 10 <= len(story) <= 16_000:
+    if not 10 <= len(story) <= MAX_STORY:
         raise ValueError("Story text must have 10–16000 characters")
-    if not 2 <= args.clips <= 33:
-        raise ValueError("Proposed scene must have 2–33 clips")
     if not 5 <= args.frames <= 121 or not 1 <= args.fps <= 60:
-        raise ValueError("Invalid shared frames or FPS")
+        raise ValueError("Invalid shared Wan frames or FPS")
+    if args.scenes < 0:
+        raise ValueError("Optional preferred scene count cannot be negative")
     plan = {
-        "version": "v1",
+        "version": "v2", "kind": "episode",
         "status": "DRAFT_NOT_APPROVED",
         "model": args.model,
         "model_role": info["role"],
-        "clips_requested": args.clips,
+        "preferred_scenes": args.scenes or None,
+        "clip_count_policy": "story_director_decides_no_creative_limit",
         "shared_frames": args.frames,
         "shared_fps": args.fps,
         "clip_seconds": round(args.frames / args.fps, 2),
@@ -109,9 +116,8 @@ def prepare(args):
     }
     write_json(args.output, plan)
     print(json.dumps({"status": plan["status"], "model": args.model,
-                      "clips": args.clips, "story_sha256": plan["story_sha256"]}),
-          flush=True)
-
+                      "preferred_scenes": plan["preferred_scenes"],
+                      "story_sha256": plan["story_sha256"]}), flush=True)
 
 def download(args):
     info = registry_entry(args.model)
