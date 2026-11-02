@@ -1,5 +1,5 @@
-# Generate first/next anime storyboard shot with saved character/scene memory (v1).
-name: Generate or continue anime story shot (v1)
+# Generate first/next anime storyboard shot with Phase 3 identity and layout guidance (v2).
+name: Generate or continue anime story shot (v2)
 
 on:
   workflow_dispatch:
@@ -32,16 +32,21 @@ on:
         description: "New action, expression, camera, and story moment"
         type: string
         required: true
-      width:
-        description: "Output width, 256-1536, divisible by 8 (512 recommended first)"
-        type: number
-        default: 512
+      size:
+        description: "Width x height, each divisible by 8; e.g. 512x768"
+        type: string
+        default: "512x768"
         required: true
-      height:
-        description: "Output height, 256-1536, divisible by 8 (768 portrait)"
-        type: number
-        default: 768
+      guidance_mode:
+        description: "Identity/layout guides; base uses least memory"
+        type: choice
+        default: base
         required: true
+        options:
+          - base
+          - ip-adapter
+          - controlnet
+          - both
       candidates:
         description: "Generate 1-4 candidates. First becomes canonical until changed."
         type: number
@@ -84,11 +89,17 @@ jobs:
           CHARACTERS: ${{ inputs.character_ids }}
           SCENE: ${{ inputs.scene_id }}
           PROMPT: ${{ inputs.shot_prompt }}
-          WIDTH: ${{ inputs.width }}
-          HEIGHT: ${{ inputs.height }}
+          IMAGE_SIZE: ${{ inputs.size }}
+          GUIDANCE_MODE: ${{ inputs.guidance_mode }}
           CANDIDATES: ${{ inputs.candidates }}
           SEED: ${{ inputs.seed }}
         run: |
+          if ! [[ "$IMAGE_SIZE" =~ ^[0-9]+x[0-9]+$ ]]; then
+            echo "::error::size must be WIDTHxHEIGHT, for example 512x768."
+            exit 1
+          fi
+          WIDTH="${IMAGE_SIZE%x*}"
+          HEIGHT="${IMAGE_SIZE#*x}"
           python3 scripts/story.py prepare \
             --mode "$MODE" \
             --story-id "$STORY" \
@@ -99,6 +110,7 @@ jobs:
             --width "$WIDTH" \
             --height "$HEIGHT" \
             --candidates "$CANDIDATES" \
+            --guidance-mode "$GUIDANCE_MODE" \
             --seed "$SEED" \
             --steps 28 \
             --cfg 6.5 \
@@ -116,16 +128,26 @@ jobs:
         run: python -m pip install --no-cache-dir -r requirements-image-v1.txt
 
       - name: Generate anime story candidate image(s)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python3 -u scripts/generate_shot.py \
             --plan work/shot-plan.json \
             --output-dir work/candidates
 
+      - name: Evaluate image-reference similarity for continuity
+        run: |
+          python3 scripts/evaluate_continuity.py \
+            --plan work/shot-plan.json \
+            --candidate-dir work/candidates \
+            --output work/continuity.json
+
       - name: Publish canonical shot, alternatives, and sequence memory
         run: |
           python3 scripts/story.py publish \
             --plan work/shot-plan.json \
-            --candidate-dir work/candidates
+            --candidate-dir work/candidates \
+            --evaluation work/continuity.json
 
       - name: Persist successful shot back into Git history
         env:
@@ -146,9 +168,10 @@ jobs:
       - name: Upload generated shots and reproducibility plan
         uses: actions/upload-artifact@v4
         with:
-          name: anime-story-shot-v1-${{ github.run_id }}
+          name: anime-story-shot-v2-${{ github.run_id }}
           path: |
             work/candidates/
             work/shot-plan.json
+            work/continuity.json
           retention-days: 7
           if-no-files-found: error
