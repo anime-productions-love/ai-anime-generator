@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate anime storyboard stills with Animagine XL 3.1 on CPU (v1).
+"""Generate anime storyboard stills with Animagine XL 3.1 on CPU (v2).
 
 One-shot/sequence continuity is planned by story.py. This module performs
 SDXL text-to-image or single-reference image-to-image inference only.
@@ -12,6 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageFilter, ImageOps
 
 MODEL = "cagliostrolab/animagine-xl-3.1"
+MODEL_REVISION = "483f0c322568ed13697ed01dd0be07204746d12b"
 
 
 def fit_reference(image, width, height):
@@ -57,7 +58,8 @@ def main():
         flush=True,
     )
     pipeline = StableDiffusionXLPipeline.from_pretrained(
-        MODEL, torch_dtype=dtype, use_safetensors=True, low_cpu_mem_usage=True,
+        MODEL, revision=MODEL_REVISION,
+        torch_dtype=dtype, use_safetensors=True, low_cpu_mem_usage=True,
         add_watermarker=False,
     ).to("cpu")
     pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
