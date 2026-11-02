@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v7
+# AI Anime Story Generator — v8
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -19,6 +19,20 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Assemble anime movie from scenes (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
 
 **Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)**.
+
+## Private gallery image input (repaired)
+
+For the consolidated [Wan scene generator](.github/workflows/generate-wan22-ti2v-turbo.yml), choose `source_mode=auto` (or `image`) and paste an **individual media file link** into `image`:
+
+```text
+https://github.com/anime-productions-love/gallery/blob/main/Zero_Two_2.jpg
+```
+
+The gallery's one-image commit page (`/commit/8e3d426698edfb8d4a3535767dddf437d14d8550`) is also accepted: the downloader resolves it to that image. For multi-image commits, use a direct `/blob/<ref>/<path>` link. `auto` also recognizes gallery video files and extracts their last frame.
+
+**Authentication:** The original advised Actions secret **`VIDEO_REPO_TOKEN` is supported and preferred**. It must be accessible to the **`ai-anime-generator` repository** under Settings → Secrets and variables → Actions (or be an organization secret enabled for that repo). Storing it in the old `ai-video-generator` repository alone does not make it available to the new one. Its fine-grained token must include the private `anime-productions-love/gallery` repository with at least Contents:read. You do not need another token or secret name if `VIDEO_REPO_TOKEN` is already accessible to the consolidated repo. Other existing gallery token names remain supported.
+
+The earlier failed Wan run 41477592109 did **not** receive any of the secret names then wired into its workflow; code has since been repaired to pass `VIDEO_REPO_TOKEN`. No gallery credentials are sent to external media hosts.
 
 ## Quick start: make a short illustrated anime sequence
 
