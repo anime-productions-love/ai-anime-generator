@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Anime shot/sequence manifests: prepare, publish, and select (v1).
+"""Anime shot/sequence manifests: prepare, publish, and select (v2).
 
 Uses Phase 1 character/scene manifests as canonical identity records.
 No model downloads and no network I/O; all work uses local Git-backed files.
@@ -75,7 +75,7 @@ def required_reference_images(kind, data):
 def character_ids(value):
     ids = [validate_id(x.strip(), "character ID") for x in value.split(",") if x.strip()]
     if len(ids) > MAX_CHARACTERS:
-        raise ValueError(f"Maximum {MAX_CHARACTERS} characters per shot in Phase 2")
+        raise ValueError(f"Maximum {MAX_CHARACTERS} characters per shot")
     if len(ids) != len(set(ids)):
         raise ValueError("Repeated character ID in a single shot")
     return ids
@@ -158,6 +158,36 @@ def prepare(args):
         if not input_path and references:
             input_path, reference_source = references[0]["path"], "reference:fallback"
 
+    # Phase 3: record bounded, verified references for actual IP-Adapter /
+    # ControlNet conditioning and only registered character LoRA repositories.
+    ip_refs = []
+    for identifier in ids:
+        choices = [r for r in references if r["kind"] == "character" and r["asset_id"] == identifier]
+        for role in ("face", "three_quarter", "full_body", "main"):
+            candidate = next((r for r in choices if r["role"] == role), None)
+            if candidate:
+                ip_refs.append(candidate)
+                break
+    if scene:
+        choices = [r for r in references if r["kind"] == "scene"]
+        scene_ref = next((r for role in ("main", "background")
+                          for r in choices if r["role"] == role), None)
+        if scene_ref:
+            ip_refs.append(scene_ref)
+    # Keep the CPU pipeline bounded: one reference per selected cast member,
+    # with a maximum of four for the single IP-Adapter input.
+    ip_refs = ip_refs[:4]
+    controls = [r for r in references if r["kind"] == "scene" and
+                r["role"] in ("canny", "layout", "edges")]
+    control_ref = controls[0] if controls else None
+    registered_loras = []
+    for char in characters:
+        ref = (char.get("adapters") or {}).get("character_lora")
+        if ref:
+            if not re.fullmatch(r"hf://[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", ref):
+                raise ValueError(f"Invalid registered LoRA for {char['id']}: expected hf://namespace/repository")
+            registered_loras.append({"character_id": char["id"], "repository": ref[5:]})
+
     negative_parts = [style.get("negative_prompt", "")]
     positive_parts = [style.get("prompt_prefix", ""), "masterpiece, best quality, cinematic anime storyboard"]
     if scene:
@@ -203,6 +233,10 @@ def prepare(args):
         "width": args.width, "height": args.height,
         "steps": args.steps, "cfg": args.cfg, "seed": args.seed,
         "candidates": args.candidates,
+        "guidance_mode": args.guidance_mode,
+        "ip_adapter_references": ip_refs,
+        "control_reference": control_ref,
+        "character_loras": registered_loras,
     }
     if not 4 <= args.steps <= 100 or not 1.0 <= args.cfg <= 15.0:
         raise ValueError("Steps must be 4–100 and guidance CFG must be 1–15")
@@ -262,6 +296,16 @@ def publish(args):
         "candidates": image_records, "selected_candidate": 1,
         "selected_image": relative(selected), "selected_sha256": digest(selected),
         "created_at": now(), "updated_at": now(),
+        "guidance": {
+            "mode": plan.get("guidance_mode", "base"),
+            "ip_adapter_references": plan.get("ip_adapter_references", []),
+            "control_reference": plan.get("control_reference"),
+            "character_loras": plan.get("character_loras", []),
+        },
+        "continuity_evaluation": (
+            load_json(args.evaluation) if args.evaluation and args.evaluation.is_file()
+            else None
+        ),
     }
     write_json(out / "manifest.json", shot)
     if not seq:
@@ -326,11 +370,15 @@ def main():
     prepare_cmd.add_argument("--cfg", type=float, default=6.5)
     prepare_cmd.add_argument("--seed", type=int, default=42)
     prepare_cmd.add_argument("--candidates", type=int, default=1)
+    prepare_cmd.add_argument("--guidance-mode",
+                             choices=("base", "ip-adapter", "controlnet", "both"),
+                             default="base")
     prepare_cmd.add_argument("--plan", type=Path, default=Path("work/shot-plan.json"))
 
     publish_cmd = cmd.add_parser("publish")
     publish_cmd.add_argument("--plan", type=Path, default=Path("work/shot-plan.json"))
     publish_cmd.add_argument("--candidate-dir", type=Path, default=Path("work/candidates"))
+    publish_cmd.add_argument("--evaluation", type=Path)
 
     select_cmd = cmd.add_parser("select")
     select_cmd.add_argument("--story-id", required=True)
