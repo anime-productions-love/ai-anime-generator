@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Chain multiple Wan video scenes across separate GitHub Actions runs (v2).
+"""Chain multiple Wan video scenes across separate GitHub Actions runs (v3).
 
 Each run is a single <=350-minute Wan job; the uploaded previous run's
-last_frame.png seeds the next segment. A fixed JSON plan supplies all prompts.
+last_frame.png seeds the next segment. A form-generated JSON plan supplies prompts and one shared configuration.
 The built-in GITHUB_TOKEN dispatches the next workflow_dispatch on success.
 """
 import argparse
@@ -75,85 +75,65 @@ def positive_int(value, label, lo, hi):
 
 
 def parse_config(path):
+    """Validate a continuous scene: one image, one immutable settings set.
+
+    No per-video source/size/FPS/seed/negative-prompt overrides. The only
+    property that changes between segments is their written motion prompt.
+    """
     data = json_read(path)
-    if not isinstance(data, dict) or data.get("version") != "v1":
-        fail("Chain plan must be a JSON object with version='v1'")
-    if set(data) - {"version", "title", "initial_image", "defaults", "segments", "assembly"}:
-        fail("Unknown root chain configuration property")
-    if not isinstance(data.get("initial_image"), str) or not data["initial_image"].strip():
-        fail("initial_image must be a direct image/gallery URL or video URL")
-    if not data["initial_image"].startswith("https://"):
-        fail("initial_image must be a public HTTPS URL or authenticated HTTPS gallery URL")
-    defaults = data.get("defaults", {})
-    if not isinstance(defaults, dict) or set(defaults) - set(DEFAULTS):
-        fail("defaults contains unsupported settings")
-    defaults = {**DEFAULTS, **defaults}
-    original = data.get("segments")
-    if not isinstance(original, list) or not original:
-        fail("segments must be a nonempty JSON list")
-    resolved = []
-    for index, spec in enumerate(original, 1):
-        if not isinstance(spec, dict):
-            fail(f"Segment entry {index} must be an object")
-        allowed = set(DEFAULTS) | {"prompt", "repeat", "source"}
-        if set(spec) - allowed:
-            fail(f"Segment entry {index} has unknown configuration keys")
-        count = positive_int(spec.get("repeat", 1), "repeat", 1, MAX_SEGMENTS)
-        current = {**defaults, **{k: v for k, v in spec.items() if k in DEFAULTS}}
-        if not isinstance(spec.get("prompt"), str) or not spec["prompt"].strip():
-            fail(f"Segment entry {index} needs a nonempty prompt")
-        current["prompt"] = spec["prompt"].strip()
-        if len(current["prompt"]) > 5000:
-            fail("Each scene prompt must be at most 5000 characters")
-        if not isinstance(current["negative_prompt"], str) or len(current["negative_prompt"]) > 3000:
-            fail("Negative prompt must be <=3000 characters")
-        if current["fit_mode"] not in ("contain", "contain-blur", "crop"):
-            fail("fit_mode must be contain, contain-blur or crop")
-        positive_int(current["frames"], "frames", 5, 121)
-        positive_int(current["fps"], "fps", 1, 60)
-        positive_int(current["width"], "width", 256, 1536)
-        positive_int(current["height"], "height", 256, 1536)
-        if current["width"] % 16 or current["height"] % 16:
-            fail("width and height must be divisible by 16")
-        positive_int(current["seed"], "seed", 0, 2147483647)
-        source = spec.get("source")
-        if source is not None and (not isinstance(source, str) or
-                                   not source.startswith("https://")):
-            fail("Optional segment source must be an HTTPS image or video URL")
-        current["source"] = source or None
-        for repetition in range(count):
-            if len(resolved) >= MAX_SEGMENTS:
-                fail(f"Maximum {MAX_SEGMENTS} scenes per chain")
-            resolved.append({**current, "entry": index, "repetition": repetition + 1})
-    assembly = data.get("assembly", {"enabled": True})
+    if not isinstance(data, dict) or data.get("version") != "v2":
+        fail("Sequence plan must be a JSON object with version='v2'")
+    if set(data) - {"version", "title", "initial_image", "settings", "prompts", "assembly"}:
+        fail("Unknown sequence plan property")
+    image = data.get("initial_image")
+    if not isinstance(image, str) or not image.startswith("https://"):
+        fail("initial_image must be an HTTPS image/video URL (private gallery supported)")
+    settings = data.get("settings")
+    if not isinstance(settings, dict) or set(settings) != set(DEFAULTS):
+        fail("settings must contain exactly negative_prompt, fit_mode, frames, fps, "
+             "width, height and seed; no per-segment overrides")
+    if not isinstance(settings["negative_prompt"], str) or len(settings["negative_prompt"]) > 3000:
+        fail("Negative prompt must be text of <= 3000 characters")
+    if settings["fit_mode"] not in ("contain", "contain-blur", "crop"):
+        fail("fit_mode must be contain, contain-blur or crop")
+    positive_int(settings["frames"], "frames", 5, 121)
+    positive_int(settings["fps"], "fps", 1, 60)
+    positive_int(settings["width"], "width", 256, 1536)
+    positive_int(settings["height"], "height", 256, 1536)
+    if settings["width"] % 16 or settings["height"] % 16:
+        fail("width and height must be multiples of 16")
+    positive_int(settings["seed"], "seed", 0, 2147483647)
+    prompts = data.get("prompts")
+    if not isinstance(prompts, list) or not 2 <= len(prompts) <= 17:
+        fail("Continuous sequence requires 2–17 written video prompts")
+    for n, prompt in enumerate(prompts, 1):
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 5000:
+            fail(f"Video prompt {n} must have 1–5000 characters")
+    resolved = [{**settings, "prompt": prompt.strip()} for prompt in prompts]
+    assembly = data.get("assembly")
     if not isinstance(assembly, dict):
-        fail("assembly must be an object")
-    if set(assembly) - {"enabled", "width", "height", "fps", "transition", "fade_seconds", "quality_crf"}:
+        fail("assembly configuration must be an object")
+    if set(assembly) - {"enabled", "width", "height", "fps", "transition",
+                         "fade_seconds", "quality_crf"}:
         fail("Unsupported assembly option")
     assembly = {
-        "enabled": True,
-        "width": resolved[0]["width"], "height": resolved[0]["height"],
-        "fps": resolved[0]["fps"], "transition": "cut",
-        "fade_seconds": "0.3", "quality_crf": 20,
+        "enabled": True, "width": settings["width"],
+        "height": settings["height"], "fps": settings["fps"],
+        "transition": "cut", "fade_seconds": "0", "quality_crf": 20,
         **assembly,
     }
-    if not isinstance(assembly["enabled"], bool):
-        fail("assembly.enabled must be true or false")
-    for k in ("width", "height"):
-        positive_int(assembly[k], "assembly."+k, 256, 1536)
-        if assembly[k] % 16:
-            fail("assembly dimensions must be multiples of 16")
-    positive_int(assembly["fps"], "assembly.fps", 1, 60)
+    if assembly["enabled"] is not True:
+        fail("Continuous sequences always assemble the final movie")
+    if (assembly["width"] != settings["width"]
+            or assembly["height"] != settings["height"]
+            or assembly["fps"] != settings["fps"]):
+        fail("Movie assembly must preserve the same resolution and FPS as every clip")
     positive_int(assembly["quality_crf"], "assembly.quality_crf", 15, 35)
-    if assembly["transition"] not in ("cut", "fade-black"):
-        fail("assembly.transition must be cut or fade-black")
-    try:
-        fade = float(assembly["fade_seconds"])
-    except (TypeError, ValueError):
-        fail("fade_seconds must be a numeric value")
-    if not 0 <= fade <= 2:
-        fail("fade_seconds must be between 0 and 2")
-    assembly["fade_seconds"] = str(fade)
+    if assembly["transition"] != "cut":
+        fail("Continuous sequence assembly only supports clean cuts")
+    if str(assembly["fade_seconds"]) not in ("0", "0.0"):
+        fail("Continuous sequence cuts require fade_seconds=0")
+    assembly["fade_seconds"] = "0"
     return data, resolved, assembly
 
 
@@ -278,9 +258,9 @@ def source(args):
         # Even if this particular shot starts from a new image, the prior
         # completed chain history must be verified and preserved.
         prev_state, prev_frame = previous_artifact(plan, ROOT / "work" / "previous-wan")
-    input_url = plan["scene"]["source"]
-    if input_url is None and plan["step"] == 1:
-        input_url = plan["initial_image"]
+    # Only the first scene may resolve an external image. Every subsequent
+    # scene MUST use the exact immediately preceding run's verified frame.
+    input_url = plan["initial_image"] if plan["step"] == 1 else None
     if input_url:
         run([
             sys.executable, "scripts/resolve_scene_input.py",
@@ -289,7 +269,7 @@ def source(args):
             "--repository", os.environ.get("GITHUB_REPOSITORY", ""),
             "--current-run-id", plan["run_id"], "--output", target,
         ])
-        print("Used explicit segment/initial URL as image source", flush=True)
+        print("Used the first and ONLY externally selected image URL", flush=True)
     elif prev_frame:
         shutil.copyfile(prev_frame, target)
         print(f"Continued from exact run {plan['previous_run_id']}'s final frame", flush=True)
