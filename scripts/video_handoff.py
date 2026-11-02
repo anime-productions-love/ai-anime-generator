@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export or dispatch one canonical storyboard image to existing video workflows (v1).
+"""Export or dispatch one canonical storyboard image to existing video workflows (v2).
 
 Dispatch is opt-in and requires a token with Actions:write on the target
 anime video repository. API dispatch acceptance does NOT mean video generated.
@@ -18,7 +18,7 @@ from pathlib import Path
 from library import ROOT, validate_id
 from story import sequence_dir
 
-TARGET = "anime-productions-love/ai-video-generator"
+TARGET = "anime-productions-love/ai-anime-generator"
 SOURCE = "anime-productions-love/ai-anime-generator"
 ENGINES = {
     "wan": "generate-wan22-ti2v-turbo.yml",
@@ -63,7 +63,7 @@ def canonical(story_id, sequence_id, shot_id):
 def dispatch(workflow, payload, token):
     if not token:
         raise ValueError(
-            "Dispatch requires VIDEO_REPO_TOKEN with Actions:write on the video repository"
+            "Dispatch requires GITHUB_TOKEN with Actions:write on this repository"
         )
     api = f"https://api.github.com/repos/{TARGET}/actions/workflows/{workflow}/dispatches"
     request = urllib.request.Request(
@@ -150,7 +150,7 @@ def main():
     if receipt_path.exists():
         raise ValueError("Handoff already exists; refusing to overwrite")
     if args.action == "dispatch":
-        dispatch(ENGINES[args.engine], inputs, os.environ.get("VIDEO_REPO_TOKEN", ""))
+        dispatch(ENGINES[args.engine], inputs, os.environ.get("GITHUB_TOKEN", ""))
     receipt = {
         "schema_version": "v1",
         "source_repo": SOURCE,
