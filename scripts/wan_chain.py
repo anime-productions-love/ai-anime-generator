@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Chain multiple Wan video scenes across separate GitHub Actions runs (v3).
+"""Chain multiple Wan video scenes across separate GitHub Actions runs (v4).
 
-Each run is a single <=350-minute Wan job; the uploaded previous run's
-last_frame.png seeds the next segment. A form-generated JSON plan supplies prompts and one shared configuration.
+Each run is a single <=350-minute Wan job; ONLY the initial clip uses
+an external image, and each later clip uses the prior clip's last_frame.png. A form-generated JSON plan supplies prompts and one shared configuration.
 The built-in GITHUB_TOKEN dispatches the next workflow_dispatch on success.
 """
 import argparse
@@ -14,14 +14,12 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
 WAN_WORKFLOW = "generate-wan22-ti2v-turbo.yml"
 MOVIE_WORKFLOW = "assemble-anime-movie.yml"
 ARTIFACT_PATTERN = re.compile(r"wan22-turbo-v[0-9]+-([0-9]+)")
-MAX_SEGMENTS = 120
 DEFAULT_NEGATIVE = "frozen frame, flicker, jitter, warped face, deformed anatomy, text, watermark"
 DEFAULTS = {
     "negative_prompt": DEFAULT_NEGATIVE,
