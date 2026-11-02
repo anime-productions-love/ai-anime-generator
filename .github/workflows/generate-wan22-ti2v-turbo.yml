@@ -1,5 +1,5 @@
-# Wan2.2 TI2V-5B Turbo, four-step GGUF: CPU-only public GitHub runner (v5).
-name: Generate Wan 2.2 Turbo anime scene (v5)
+# Wan2.2 TI2V-5B Turbo, single/automatic chained scenes on CPU (v6).
+name: Generate Wan 2.2 Turbo anime scene (v6)
 
 on:
   workflow_dispatch:
@@ -63,10 +63,34 @@ on:
         type: number
         required: true
         default: 42
+      chain_plan:
+        description: "Optional: chains/<name>.json; generate ALL segments automatically"
+        type: string
+        required: false
+        default: ""
+      chain_step:
+        description: "Internal chain step (1=first segment); leave 1 to start"
+        type: number
+        required: false
+        default: 1
+      chain_previous_run:
+        description: "Internal: exact preceding Wan run ID; leave empty to start"
+        type: string
+        required: false
+        default: ""
+      chain_id:
+        description: "Internal: ID of first run in chain; leave empty to start"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
-  actions: read
+  actions: write
+
+concurrency:
+  group: wan-chain-${{ inputs.chain_id != '' && inputs.chain_id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   generate:
@@ -77,6 +101,27 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Prepare build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build libopenblas-dev ffmpeg
+
+      - name: Prepare optional automatic scene chain plan
+        if: inputs.chain_plan != ''
+        env:
+          CHAIN_PLAN: ${{ inputs.chain_plan }}
+          CHAIN_STEP: ${{ inputs.chain_step }}
+          CHAIN_PREVIOUS_RUN: ${{ inputs.chain_previous_run }}
+          CHAIN_ID: ${{ inputs.chain_id }}
+        run: |
+          python3 scripts/wan_chain.py prepare \
+            --plan-path "$CHAIN_PLAN" \
+            --index "$CHAIN_STEP" \
+            --previous-run "${CHAIN_PREVIOUS_RUN:-0}" \
+            --chain-id "$CHAIN_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --output work/wan-chain-plan.json
 
       - name: Resolve image, latest successful Wan frame, or video URL
         env:
@@ -92,19 +137,21 @@ jobs:
           INPUT_URL: ${{ inputs.image }}
           REPOSITORY: ${{ github.repository }}
           CURRENT_RUN_ID: ${{ github.run_id }}
+          CHAIN_PLAN: ${{ inputs.chain_plan }}
         run: |
-          python3 scripts/resolve_scene_input.py \
-            --source-mode "$SOURCE_MODE" \
-            --input "$INPUT_URL" \
-            --workflow-file generate-wan22-ti2v-turbo.yml \
-            --repository "$REPOSITORY" \
-            --current-run-id "$CURRENT_RUN_ID" \
-            --output inputs/downloaded_image
-
-      - name: Prepare build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake ninja-build libopenblas-dev ffmpeg
+          if [ -n "$CHAIN_PLAN" ]; then
+            python3 scripts/wan_chain.py source \
+              --plan work/wan-chain-plan.json \
+              --output inputs/downloaded_image
+          else
+            python3 scripts/resolve_scene_input.py \
+              --source-mode "$SOURCE_MODE" \
+              --input "$INPUT_URL" \
+              --workflow-file generate-wan22-ti2v-turbo.yml \
+              --repository "$REPOSITORY" \
+              --current-run-id "$CURRENT_RUN_ID" \
+              --output inputs/downloaded_image
+          fi
 
       - name: Build pinned stable-diffusion.cpp CPU backend
         run: |
@@ -148,26 +195,49 @@ jobs:
           WAN_HEIGHT: ${{ inputs.height }}
           WAN_STEPS: 4
           WAN_SEED: ${{ inputs.seed }}
+          CHAIN_PLAN: ${{ inputs.chain_plan }}
         run: |
-          python -u scripts/generate_wan22.py \
-            --image "$WAN_IMAGE" \
-            --prompt "$WAN_PROMPT" \
-            --negative-prompt "$WAN_NEGATIVE" \
-            --scene-name "$WAN_NAME" \
-            --fit-mode "$WAN_FIT" \
-            --frames "$WAN_FRAMES" \
-            --fps "$WAN_FPS" \
-            --width "$WAN_WIDTH" \
-            --height "$WAN_HEIGHT" \
-            --steps "$WAN_STEPS" \
-            --seed "$WAN_SEED" \
+          if [ -n "$CHAIN_PLAN" ]; then
+            python3 -u scripts/wan_chain.py generate \
+              --plan work/wan-chain-plan.json \
+              --output-dir outputs/wan22
+          else
+            python -u scripts/generate_wan22.py \
+              --image "$WAN_IMAGE" \
+              --prompt "$WAN_PROMPT" \
+              --negative-prompt "$WAN_NEGATIVE" \
+              --scene-name "$WAN_NAME" \
+              --fit-mode "$WAN_FIT" \
+              --frames "$WAN_FRAMES" \
+              --fps "$WAN_FPS" \
+              --width "$WAN_WIDTH" \
+              --height "$WAN_HEIGHT" \
+              --steps "$WAN_STEPS" \
+              --seed "$WAN_SEED" \
+              --output-dir outputs/wan22
+          fi
+
+      - name: Record successful chain step and verified final-frame digest
+        if: inputs.chain_plan != ''
+        run: |
+          python3 scripts/wan_chain.py record \
+            --plan work/wan-chain-plan.json \
             --output-dir outputs/wan22
 
       - name: Publish complete scene artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: wan22-turbo-v5-${{ github.run_id }}
+          name: wan22-turbo-v6-${{ github.run_id }}
           path: outputs/wan22/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Dispatch next scene or final movie after uploading artifact
+        if: inputs.chain_plan != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/wan_chain.py advance \
+            --plan work/wan-chain-plan.json \
+            --output-dir outputs/wan22
