@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble canonical anime story shots into comic pages and storyboard assets (v1).
+"""Assemble canonical anime story shots into comic pages and storyboard assets (v2).
 
 No AI inference is performed. Source images are accepted only from the existing
 Git-backed sequence manifest, with SHA-256 matching the selected shot records.
@@ -9,6 +9,8 @@ import hashlib
 import io
 import json
 import math
+import subprocess
+import urllib.parse
 import shutil
 import textwrap
 import zipfile
@@ -195,8 +197,14 @@ def main():
         shots, captions, args.layout, args.per_page, export_dir / "pages",
         f"{story_id} / {sequence_id}", dimensions[1], dimensions[0],
     )
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True, cwd=ROOT,
+    ).strip()
+    if len(commit) != 40 or any(c not in "0123456789abcdef" for c in commit):
+        raise ValueError("Unable to obtain a full immutable source Git commit")
     export_manifest = {
         "schema_version": "v1",
+        "source_git_commit": commit,
         "export_id": "export-"+args.export_id,
         "story_id": story_id, "sequence_id": sequence_id,
         "layout": args.layout, "per_page": args.per_page,
@@ -215,6 +223,10 @@ def main():
             "prompt": shot.get("prompt", ""),
             "negative_prompt": shot.get("composed_negative_prompt", ""),
             "video_image_path": selected_path.relative_to(ROOT).as_posix(),
+            "video_image_url": (
+                f"{ORIGIN}/{commit}/" +
+                urllib.parse.quote(selected_path.relative_to(ROOT).as_posix(), safe="/")
+            ),
         })
     for p in pages:
         export_manifest["pages"].append({
