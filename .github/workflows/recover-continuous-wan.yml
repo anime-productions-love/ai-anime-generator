@@ -1,11 +1,11 @@
-# Bounded automatic recovery for failed multi-clip Wan jobs (v1).
+# Bounded automatic recovery for failed multi-clip Wan jobs (v2).
 # Never retry an ambiguous successor dispatch to avoid duplicate scenes.
-name: Recover failed continuous Wan scene (v1)
+name: Recover failed continuous Wan scene (v2)
 
 on:
   workflow_run:
     workflows:
-      - Generate Wan 2.2 Turbo anime scene (v8)
+      - Generate Wan 2.2 Turbo anime scene (v9)
     types:
       - completed
 
@@ -52,8 +52,10 @@ jobs:
             echo "::warning::Successor-dispatch failure requires review to prevent duplicate video jobs."
             exit 0
           fi
-          # Only retry defined network/build/model or post-render persistence steps.
-          if grep -Eq '^(Resolve image|Restore|Build stable-diffusion|Download missing Wan|Generate prompt-directed scene|Record successful chain|Publish complete scene artifact|Archive every Wan output)' <<< "$failed"; then
+          # A failed archive-and-advance job is retried independently;
+          # the successful generation job is NOT re-executed.
+          # Never retry ambiguous dispatch failures.
+          if grep -Eq '^(Resolve image|Restore|Build stable-diffusion|Download missing Wan|Generate prompt-directed scene|Record successful chain|Publish complete scene artifact|Archive complete Wan output|Verify completed video|Retrieve only completed generation)' <<< "$failed"; then
             echo "Automatic retry for chain run $SOURCE_RUN, attempt $RUN_ATTEMPT; failed: $failed"
             gh api --method POST \
               "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/rerun-failed-jobs"
