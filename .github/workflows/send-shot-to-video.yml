@@ -1,0 +1,134 @@
+# Optional bridge from verified selected anime shot to existing Wan/SVD workflows (v1).
+name: Export or send selected anime shot to video generator (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      story_id:
+        description: "Existing story ID"
+        required: true
+        type: string
+      sequence_id:
+        description: "Existing sequence ID"
+        required: true
+        type: string
+      shot_id:
+        description: "Published shot ID, e.g. 0001"
+        required: true
+        type: string
+      engine:
+        description: "Existing video workflow to use"
+        required: true
+        type: choice
+        default: wan
+        options:
+          - wan
+          - svd
+      action:
+        description: "Export manifest only, or dispatch video generation"
+        type: choice
+        required: true
+        default: export
+        options:
+          - export
+          - dispatch
+      motion_prompt:
+        description: "Optional action/camera prompt for Wan video (blank = generated default)"
+        required: false
+        type: string
+      width:
+        description: "Wan output width, 480 recommended for portrait"
+        required: true
+        type: number
+        default: 480
+      height:
+        description: "Wan output height, 832 recommended for portrait"
+        required: true
+        type: number
+        default: 832
+      frames:
+        description: "Target video frames (Wan default 17)"
+        required: true
+        type: number
+        default: 17
+      fps:
+        description: "Video playback FPS (Wan default 8)"
+        required: true
+        type: number
+        default: 8
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      STORY: ${{ inputs.story_id }}
+      SEQUENCE: ${{ inputs.sequence_id }}
+      SHOT: ${{ inputs.shot_id }}
+      ENGINE: ${{ inputs.engine }}
+      ACTION_MODE: ${{ inputs.action }}
+      MOTION: ${{ inputs.motion_prompt }}
+      WIDTH: ${{ inputs.width }}
+      HEIGHT: ${{ inputs.height }}
+      FRAMES: ${{ inputs.frames }}
+      FPS: ${{ inputs.fps }}
+      VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+    steps:
+      - name: Checkout saved sequence and canonical selected image
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Export image handoff, optionally dispatch target repository workflow
+        run: |
+          python3 scripts/video_handoff.py \
+            --story-id "$STORY" \
+            --sequence-id "$SEQUENCE" \
+            --shot-id "$SHOT" \
+            --engine "$ENGINE" \
+            --action "$ACTION_MODE" \
+            --motion-prompt "$MOTION" \
+            --width "$WIDTH" \
+            --height "$HEIGHT" \
+            --frames "$FRAMES" \
+            --fps "$FPS" \
+            --handoff-id "$GITHUB_RUN_ID"
+
+      - name: Preserve handoff metadata in Git history
+        run: |
+          set -euo pipefail
+          git add -- "stories/$STORY/sequences/$SEQUENCE/video-handoffs/handoff-$GITHUB_RUN_ID.json"
+          if git diff --cached --quiet; then
+            echo "::error::No video handoff receipt created"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Anime video handoff v1: $STORY/$SEQUENCE/$SHOT"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Publish handoff details in GitHub Actions summary
+        run: |
+          {
+            echo "### Anime shot video handoff"
+            echo ""
+            echo "- Source: $STORY / $SEQUENCE / $SHOT"
+            echo "- Target engine: $ENGINE"
+            echo "- Requested action: $ACTION_MODE"
+            if [[ "$ACTION_MODE" == dispatch ]]; then
+              echo "- Dispatch: GitHub accepted workflow request; video generation still unverified"
+            else
+              echo "- Dispatch: Not requested"
+            fi
+            echo "- Receipt: stories/$STORY/sequences/$SEQUENCE/video-handoffs/handoff-$GITHUB_RUN_ID.json"
+            echo "- Video workflow: https://github.com/anime-productions-love/ai-video-generator/actions"
+          } >> "$GITHUB_STEP_SUMMARY"
