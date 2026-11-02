@@ -1,0 +1,168 @@
+# Wan2.2 TI2V-5B Turbo, four-step GGUF: CPU-only public GitHub runner (v4).
+name: Generate Wan 2.2 Turbo anime scene (v4)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_mode:
+        description: "Start with an image, continue latest Wan scene, or use video URL"
+        type: choice
+        required: true
+        default: image
+        options:
+          - image
+          - continue-last
+          - video-url
+      image:
+        description: "Direct image URL/repo path OR video URL; ignored for continue-last"
+        type: string
+        required: false
+        default: "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/svd/rocket.png"
+      prompt:
+        description: "Describe the scene action, character movement, and camera movement"
+        type: string
+        required: true
+        default: "Anime cinematic scene, subject moves naturally, camera slowly pushes in."
+      negative_prompt:
+        description: "Things the model should avoid"
+        type: string
+        required: false
+        default: "frozen frame, flicker, jitter, warped face, deformed anatomy, text, watermark"
+      fit_mode:
+        description: "Keep full image visible, or center-crop"
+        type: choice
+        required: true
+        default: "contain-blur"
+        options:
+          - "contain-blur"
+          - "contain"
+          - "crop"
+      frames:
+        description: "Number of delivered frames; backend rounds up to 4n+1"
+        type: number
+        required: true
+        default: 17
+      fps:
+        description: "Video playback frames per second"
+        type: number
+        required: true
+        default: 8
+      width:
+        description: "Width, a multiple of 16"
+        type: number
+        required: true
+        default: 832
+      height:
+        description: "Height, a multiple of 16"
+        type: number
+        required: true
+        default: 480
+      seed:
+        description: "Random seed for reproducibility"
+        type: number
+        required: true
+        default: 42
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve image, latest successful Wan frame, or video URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
+          GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
+          GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
+          SOURCE_MODE: ${{ inputs.source_mode }}
+          INPUT_URL: ${{ inputs.image }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 scripts/resolve_scene_input.py \
+            --source-mode "$SOURCE_MODE" \
+            --input "$INPUT_URL" \
+            --workflow-file generate-wan22-ti2v-turbo.yml \
+            --repository "$REPOSITORY" \
+            --current-run-id "$CURRENT_RUN_ID" \
+            --output inputs/downloaded_image
+
+      - name: Prepare build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build libopenblas-dev ffmpeg
+
+      - name: Build pinned stable-diffusion.cpp CPU backend
+        run: |
+          git clone https://github.com/leejet/stable-diffusion.cpp.git sd-cpp
+          git -C sd-cpp checkout 290148d2e31ca6ef9757d567905776b5f3646db5
+          git -C sd-cpp submodule update --init --recursive
+          cmake -S sd-cpp -B sd-cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSD_BUILD_EXAMPLES=ON -DSD_CUDA=OFF -DSD_VULKAN=OFF
+          cmake --build sd-cpp/build --parallel 4
+
+      - name: Download Wan Turbo Q4, UMT5 Q3, and Wan2.2 VAE
+        run: |
+          mkdir -p models/wan22
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 \
+            -o models/wan22/Wan2_2-TI2V-5B-Turbo-Q4_K_M.gguf \
+            'https://huggingface.co/hum-ma/Wan2.2-TI2V-5B-Turbo-GGUF/resolve/main/Wan2_2-TI2V-5B-Turbo-Q4_K_M.gguf'
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 \
+            -o models/wan22/umt5-xxl-encoder-Q3_K_S.gguf \
+            'https://huggingface.co/city96/umt5-xxl-encoder-gguf/resolve/main/umt5-xxl-encoder-Q3_K_S.gguf'
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 \
+            -o models/wan22/Wan2.2_VAE.safetensors \
+            'https://huggingface.co/QuantStack/Wan2.2-TI2V-5B-GGUF/resolve/main/VAE/Wan2.2_VAE.safetensors'
+
+      - name: Set up Python for scene packaging
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pillow for full-image framing
+        run: python -m pip install --no-cache-dir 'Pillow>=10.4,<13'
+
+      - name: Generate prompt-directed scene
+        env:
+          WAN_IMAGE: inputs/downloaded_image
+          WAN_PROMPT: ${{ inputs.prompt }}
+          WAN_NEGATIVE: ${{ inputs.negative_prompt }}
+          WAN_NAME: scene-${{ github.run_id }}
+          WAN_FIT: ${{ inputs.fit_mode }}
+          WAN_FRAMES: ${{ inputs.frames }}
+          WAN_FPS: ${{ inputs.fps }}
+          WAN_WIDTH: ${{ inputs.width }}
+          WAN_HEIGHT: ${{ inputs.height }}
+          WAN_STEPS: 4
+          WAN_SEED: ${{ inputs.seed }}
+        run: |
+          python -u scripts/generate_wan22.py \
+            --image "$WAN_IMAGE" \
+            --prompt "$WAN_PROMPT" \
+            --negative-prompt "$WAN_NEGATIVE" \
+            --scene-name "$WAN_NAME" \
+            --fit-mode "$WAN_FIT" \
+            --frames "$WAN_FRAMES" \
+            --fps "$WAN_FPS" \
+            --width "$WAN_WIDTH" \
+            --height "$WAN_HEIGHT" \
+            --steps "$WAN_STEPS" \
+            --seed "$WAN_SEED" \
+            --output-dir outputs/wan22
+
+      - name: Publish complete scene artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wan22-turbo-v4-${{ github.run_id }}
+          path: outputs/wan22/
+          if-no-files-found: error
+          retention-days: 7
