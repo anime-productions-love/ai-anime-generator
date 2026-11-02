@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v6
+# AI Anime Story Generator — v7
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -12,9 +12,13 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Cache anime reference embedding (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/cache-reference-embedding.yml) | Save safe, SHA-bound IP-Adapter Plus embeddings for one character/scene reference |
 | [Prepare or finalize distributed CPU character LoRA (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/train-character-lora.yml) | Prepare a request for the separate multi-runner CPU training network; verify and register the returned private LoRA only after training finishes |
 | [Publish anime comic pages and storyboard (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/publish-storyboard.yml) | Generate permanent comic-page PNGs, a CBZ comic and storyboard ZIP from approved images |
-| [Export or send selected anime shot to video generator (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/send-shot-to-video.yml) | Export one selected image using a commit-pinned URL, or optionally dispatch an existing Wan/SVD video workflow |
+| [Export or send selected anime shot to video generator (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/send-shot-to-video.yml) | Export a commit-pinned selected shot or dispatch a video generator in this same repository |
+| [Generate Wan 2.2 Turbo anime scene (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-wan22-ti2v-turbo.yml) | Generate a prompt-directed video from a character image, private-gallery URL, or previous Wan clip |
+| [Generate SVD-XT video (v8)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-svd-xt.yml) | Generate an SVD-XT video from an image, private-gallery URL or previous SVD clip |
+| [Smooth or speed up anime video (RIFE AI) (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
+| [Assemble anime movie from scenes (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
 
-**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)**.
+**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)**.
 
 ## Quick start: make a short illustrated anime sequence
 
@@ -30,9 +34,17 @@ Successful shots are saved to `stories/<story-id>/sequences/<seq-id>/shots/0001/
 
 Once a sequence has saved selected images, run **Publish anime comic pages and storyboard** with your story/sequence IDs. Optionally select an ordered shot subset and captions. It composes letterboxed panels into permanent PNG pages and archives them as a CBZ and a storyboard ZIP containing the original keyframes, prompts and order. Older exports are never overwritten.
 
-Run **Export or send selected anime shot to video generator** for a chosen `shot_id`. The default `export` mode commits a verified, immutable raw-Git image URL and mapped video inputs without launching any video. Optional `dispatch` requests an existing [Wan/SVD video workflow](https://github.com/anime-productions-love/ai-video-generator/actions) using GitHub secret `VIDEO_REPO_TOKEN` (Actions:write on the video repository). Dispatch acceptance is **not** video completion. Combine successful video clips later using the [existing movie combiner](https://github.com/anime-productions-love/ai-video-generator/actions/workflows/assemble-anime-movie.yml).
+Run **Export or send selected anime shot to video generator** for a chosen `shot_id`. The default `export` mode commits a verified, immutable raw-Git image URL and mapped video inputs without launching any video. Optional `dispatch` requests an existing [Wan/SVD video workflow](https://github.com/anime-productions-love/ai-anime-generator/actions) **in this same repository**, using the built-in GitHub Actions token with `actions: write` (no cross-repository dispatch token required). Dispatch acceptance is **not** video completion. You can smooth completed video clips using the [RIFE AI interpolation workflow](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml), then combine original or smoothed clips using the [movie combiner](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml).
 
 **Phase 4 is CPU-only and does not need LoRA training or a GPU.** [Complete Phase 4 instructions](docs/PHASE4-SETUP-v1.md).
+
+## Smooth video without another Wan generation
+
+Your completed Wan run **41448667591** in the legacy video repo produced **42 frames at 6 FPS** (about 7 seconds). Playing those *same frames* at 12 FPS would run **2× faster** and last roughly 3.5 seconds. Interpolation creates in-between frames to smooth animation while maintaining duration unless you independently adjust speed.
+
+Open [Smooth or speed up anime video](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml), enter `source_run=41448667591`, `source_repo=auto`, `method=rife`, `target_fps=24`, and `playback_speed=1.5` or `2.0`. This does not rerun the 2½-hour diffusion generation. The RIFE CPU postprocessor is a separate stage and has not yet been runtime-verified on the free runner. Choose `method=motion` for non-neural FFmpeg optical-flow interpolation.
+
+[Full frame interpolation and speed-control guide](docs/VIDEO-INTERPOLATION-SETUP-v1.md).
 
 ## How Phase 3 continuity really works
 
@@ -67,17 +79,24 @@ scripts/prepare_lora_dataset.py           Verified distributed training dataset 
 scripts/distributed_lora.py               Distributed CPU request, provenance verification and immutable model acceptance (v1)
 stories/<story>/sequences/<sequence>/     Canonical storyboard, comic exports and video receipts
 scripts/assemble_storyboard.py               Comic PNG pages, CBZ and storyboard ZIP exporter (v2)
-scripts/video_handoff.py                     Verified shot URL and optional Wan/SVD dispatch (v1)
+scripts/video_handoff.py                     Verified shot URL and same-repo Wan/SVD dispatch (v3)
+scripts/interpolate_video.py                  RIFE AI / FFmpeg optical-flow smoothing + retiming (v1)
+scripts/generate_wan22.py                      Wan 2.2 Turbo CPU video generation
+scripts/generate.py                            SVD-XT CPU video generation
+scripts/assemble_movie.py                     Join original or interpolated MP4 clips
+.github/workflows/enhance-anime-video.yml     Standalone AI frame interpolation and playback speed (v1)
+.github/workflows/assemble-anime-movie.yml    Mixed original/interpolated clip assembly (v4)
 .github/workflows/publish-storyboard.yml     Comic and storyboard publishing (v1)
-.github/workflows/send-shot-to-video.yml     Export-only or remote video generation handoff (v1)
+.github/workflows/send-shot-to-video.yml     Export-only or same-repository video generation handoff (v2)
 schemas/                                  Versioned character/scene/shot JSON contracts
 docs/PHASE3-SETUP-v3.md                   Phase 3 guide with distributed CPU training integration
 docs/PHASE4-SETUP-v1.md                   Phase 4 comic/storyboard/video guide
+docs/VIDEO-INTERPOLATION-SETUP-v1.md       CPU frame interpolation, smoothing and adjustable speed
 ```
 
 ## Verification and scope
 
-Phase 4 source code and workflows are committed. **No Phase 4 comic export, cross-repository dispatch, AI generation or tests were executed.** Source read-back verification is not an end-to-end runtime result.
+Phase 4 source code and the consolidated video workflows are committed. **No new Phase 4, interpolation, movie assembly, video dispatch, or test runs were executed during consolidation.** The older Wan run 41448667591 completed successfully in the original video repository; the new RIFE postprocessor is not yet runtime-verified.
 
 **Distributed CPU training integration:** [Exact request/response contract v1](docs/DISTRIBUTED-CPU-TRAINER-CONTRACT-v1.md) for the other agent building the multi-GitHub-runner network. A prepared training request is not a completed training run.
 
