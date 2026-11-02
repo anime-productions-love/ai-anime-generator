@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read image/video links from the specific private anime gallery via GitHub API (v2).
+"""Read image/video links from the specific private anime gallery via GitHub API (v3).
 
 Only URLs referring to anime-productions-love/gallery can receive the gallery
 fine-grained PAT. Other image/video hosts use their existing public download
@@ -41,9 +41,13 @@ def parse_gallery_url(url):
             return None
         ref, repo_path = parts[2], "/".join(parts[3:])
     else:
-        if len(parts) < 5 or parts[:2] != ["anime-productions-love", "gallery"]:
+        if len(parts) < 4 or parts[:2] != ["anime-productions-love", "gallery"]:
             return None
-        if parts[2] not in ("blob", "raw"):
+        if parts[2] == "commit":
+            if len(parts) != 4 or not re.fullmatch(r"[a-fA-F0-9]{40}", parts[3]):
+                raise ValueError("Gallery commit link must contain a full 40-character commit SHA.")
+            return parts[3].lower(), None
+        if parts[2] not in ("blob", "raw") or len(parts) < 5:
             return None
         ref, repo_path = parts[3], "/".join(parts[4:])
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", ref):
@@ -71,7 +75,11 @@ def fetch_gallery_bytes(url, max_bytes=MAX_REPO_FILE):
         return None
     token = (os.environ.get("GITHUB_FINE_GRAINED_TOKEN")
              or os.environ.get("GALLERY_REPO_TOKEN")
-             or os.environ.get("GALLERY_TOKEN"))
+             or os.environ.get("GALLERY_TOKEN")
+             or os.environ.get("GITHUB_PAT")
+             or os.environ.get("GH_PAT")
+             or os.environ.get("GALLERY_PAT")
+             or os.environ.get("VIDEO_REPO_TOKEN"))
     if not token:
         raise ValueError(
             "Private gallery URL requires a GitHub Actions secret "
@@ -109,6 +117,27 @@ def fetch_gallery_bytes(url, max_bytes=MAX_REPO_FILE):
                 ) from error
             raise ValueError(f"GitHub gallery API failed (HTTP {error.code}).") from error
 
+    if repo_path is None:
+        # A GitHub /commit/<SHA> page is not itself a media file.
+        # Resolve only an unambiguous image/video file added or modified
+        # by that exact commit; never silently choose among multiple media.
+        commit = api_json(f"repos/{GALLERY}/commits/{ref}")
+        changed = [
+            item["filename"] for item in commit.get("files", [])
+            if item.get("status") != "removed"
+            and item.get("filename", "").lower().endswith(
+                (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp",
+                 ".mp4", ".mov", ".webm", ".mkv", ".avi")
+            )
+        ]
+        if len(changed) != 1:
+            raise ValueError(
+                "Gallery commit URL must contain exactly one new/modified "
+                "image or video; found " + str(len(changed)) +
+                ". Use a direct GitHub /blob/<ref>/<path> media file URL."
+            )
+        repo_path = changed[0]
+        print(f"Resolved gallery commit {ref} to {repo_path}", flush=True)
     escaped_path = urllib.parse.quote(repo_path, safe="/")
     escaped_ref = urllib.parse.quote(ref, safe="")
     record = api_json(
