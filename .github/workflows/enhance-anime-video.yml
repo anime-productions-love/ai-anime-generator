@@ -1,5 +1,5 @@
-# Post-process existing Wan or assembled anime movie without rerunning inference (v3).
-name: Smooth or speed up anime video (RIFE AI) (v3)
+# Post-process existing Wan or assembled anime movie without rerunning inference (v4).
+name: Smooth or speed up anime video (RIFE AI) (v4)
 
 on:
   workflow_dispatch:
@@ -136,10 +136,18 @@ jobs:
       - name: Upload enhanced MP4, final frame and timing metadata
         uses: actions/upload-artifact@v4
         with:
-          name: anime-smooth-video-v3-${{ github.run_id }}
+          name: anime-smooth-video-v4-${{ github.run_id }}
           path: |
             outputs/enhanced/video.mp4
             outputs/enhanced/last_frame.png
             outputs/enhanced/metadata.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Archive all enhanced outputs permanently to private gallery
+        if: success()
+        env:
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+        run: |
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind enhanced --source outputs/enhanced
