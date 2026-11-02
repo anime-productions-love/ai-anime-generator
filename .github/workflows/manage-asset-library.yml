@@ -1,5 +1,5 @@
-# Manage persistent anime characters and scene packs (v2).
-name: Manage character and scene library (v2)
+# Manage persistent anime characters and scene packs (v3).
+name: Manage character and scene library (v3)
 
 on:
   workflow_dispatch:
@@ -79,6 +79,10 @@ jobs:
           GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
           GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
           GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GALLERY_PAT: ${{ secrets.GALLERY_PAT }}
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
           LIB_KIND: ${{ inputs.kind }}
           LIB_ID: ${{ inputs.asset_id }}
           LIB_NAME: ${{ inputs.name }}
