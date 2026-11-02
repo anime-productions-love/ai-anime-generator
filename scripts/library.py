@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Git-backed character and scene library manager (v1).
+"""Git-backed character and scene library manager (v2).
 
 Python standard library only. Phase 1 stores durable reference images and
 reusable manifests; it does not train LoRAs or invoke an image generator.
@@ -272,6 +272,25 @@ def add_reference(args):
     print(f"Attached {args.role} reference to {args.kind} {args.id}")
 
 
+def register_lora(args):
+    """Register an uploaded character LoRA model as a stable HF Hub reference."""
+    if args.kind != "character":
+        raise ValueError("LoRA registration is supported for characters only")
+    repo_id = args.hub_repo
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo_id or ""):
+        raise ValueError("--hub-repo must be namespace/repository on Hugging Face")
+    data = read_pack("character", args.id)
+    new_ref = "hf://" + repo_id
+    if data["adapters"]["character_lora"] == new_ref:
+        print("Character LoRA already registered; no change")
+        return
+    data["adapters"]["character_lora"] = new_ref
+    data["revision"] += 1
+    data["updated_at"] = stamp()
+    save_manifest("character", args.id, data)
+    print(f"Registered character LoRA {new_ref} for {args.id}")
+
+
 def list_packs(args):
     directory = ROOT / "assets" / KIND_DIR[args.kind]
     packs = []
@@ -303,11 +322,13 @@ def show(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="operation", required=True)
-    for action in ("create", "update", "add-reference", "list", "show", "resolve"):
+    for action in ("create", "update", "add-reference", "register-lora", "list", "show", "resolve"):
         p = commands.add_parser(action)
         p.add_argument("--kind", choices=tuple(KIND_DIR), required=True)
         if action != "list":
             p.add_argument("--id", required=True)
+        if action == "register-lora":
+            p.add_argument("--hub-repo", required=True)
         if action in ("create", "update", "add-reference"):
             p.add_argument("--image-url")
             p.add_argument("--file")
@@ -324,7 +345,8 @@ def main():
     try:
         {
             "create": create, "update": update,
-            "add-reference": add_reference, "list": list_packs,
+            "add-reference": add_reference, "register-lora": register_lora,
+            "list": list_packs,
             "show": show, "resolve": show,
         }[args.operation](args)
     except (ValueError, OSError, urllib.error.URLError, json.JSONDecodeError) as error:
