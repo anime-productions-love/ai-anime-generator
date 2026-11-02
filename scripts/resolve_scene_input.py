@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Resolve a generation source from an image, previous scene, or video URL (v2).
+
+Use the most recent *successful same-workflow* run with an unexpired artifact
+for automatic continuation; never select the current run or another model.
+"""
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+from gallery_source import fetch_gallery_bytes
+
+WORKFLOWS = {
+    "generate-svd-xt.yml": "svd-xt",
+    "generate-wan22-ti2v-turbo.yml": "wan22-turbo",
+}
+MAX_VIDEO_BYTES = 512 * 1024 * 1024
+
+
+def command(argv, *, capture=False):
+    result = subprocess.run(
+        list(map(str, argv)), check=True, text=True,
+        capture_output=capture,
+    )
+    return result.stdout if capture else None
+
+
+def gh_json(api_path):
+    output = command(["gh", "api", api_path], capture=True)
+    return json.loads(output)
+
+
+def latest_frame(repository, workflow_file, current_run, destination):
+    prefix = WORKFLOWS[workflow_file]
+    for page in range(1, 6):
+        query = (
+            f"repos/{repository}/actions/workflows/{workflow_file}/runs"
+            f"?status=success&per_page=100&page={page}"
+        )
+        runs = gh_json(query).get("workflow_runs", [])
+        if not runs:
+            break
+        for item in runs:
+            run_id = int(item["id"])
+            if run_id >= current_run or item.get("conclusion") != "success":
+                continue
+            # A successful workflow does not necessarily have a usable artifact.
+            artifacts = gh_json(
+                f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100"
+            ).get("artifacts", [])
+            matching = [
+                a for a in artifacts
+                if not a.get("expired", False)
+                and re.fullmatch(
+                    rf"{re.escape(prefix)}-v[0-9]+-{run_id}", a.get("name", "")
+                )
+            ]
+            if len(matching) != 1:
+                continue
+            with tempfile.TemporaryDirectory(prefix="previous_scene_") as directory:
+                command([
+                    "gh", "run", "download", str(run_id),
+                    "--repo", repository,
+                    "--name", matching[0]["name"],
+                    "--dir", directory,
+                ])
+                frames = list(Path(directory).rglob("last_frame.png"))
+                if len(frames) != 1 or frames[0].stat().st_size == 0:
+                    raise RuntimeError(
+                        f"Successful run {run_id} has an artifact but not exactly one "
+                        "valid last_frame.png. Repair that artifact or use an image URL."
+                    )
+                shutil.copyfile(frames[0], destination)
+            print(
+                f"Continuing from {workflow_file} run {run_id} "
+                f"(artifact {matching[0]['name']}).",
+                flush=True,
+            )
+            return
+    raise RuntimeError(
+        f"No earlier successful {workflow_file} run has an unexpired "
+        "video artifact with a final frame. Start with Image URL first. "
+        "Generator artifacts currently expire after seven days."
+    )
+
+
+def download_video(url, destination):
+    gallery_data = fetch_gallery_bytes(url, MAX_VIDEO_BYTES)
+    if gallery_data is not None:
+        destination.write_bytes(gallery_data)
+        return
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("https", "http") or not parsed.netloc:
+        raise ValueError("Video URL must be a direct, public HTTP(S) URL.")
+    if parsed.username or parsed.password:
+        raise ValueError("Do not supply embedded URL credentials.")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 AnimeVideoGenerator/1.0",
+            "Accept": "video/*,application/octet-stream",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            final = urllib.parse.urlsplit(response.geturl())
+            if final.scheme not in ("https", "http"):
+                raise ValueError("Video redirect must remain HTTP(S).")
+            kind = response.headers.get("Content-Type", "").lower()
+            if "text/html" in kind:
+                raise ValueError(
+                    "Video host returned an HTML page instead of a video. "
+                    "Use a direct downloadable video file URL."
+                )
+            length = response.headers.get("Content-Length")
+            if length and int(length) > MAX_VIDEO_BYTES:
+                raise ValueError("Video is over the 512 MiB download limit.")
+            amount = 0
+            with destination.open("wb") as out:
+                while True:
+                    part = response.read(1024 * 1024)
+                    if not part:
+                        break
+                    amount += len(part)
+                    if amount > MAX_VIDEO_BYTES:
+                        raise ValueError("Video is over the 512 MiB download limit.")
+                    out.write(part)
+    except urllib.error.URLError as error:
+        raise RuntimeError(
+            f"Video host could not be accessed: {error}. "
+            "Use a direct public video file URL, not a video player page."
+        ) from error
+    if destination.stat().st_size == 0:
+        raise RuntimeError("Video host returned an empty file.")
+
+
+def extract_last_video_frame(video_file, destination):
+    try:
+        # -update 1 overwrites the same image for every decoded video frame;
+        # the file left at completion is the final decoded frame.
+        command([
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-nostdin", "-y", "-i", video_file, "-map", "0:v:0",
+            "-an", "-vsync", "0", "-f", "image2", "-update", "1",
+            destination,
+        ])
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            "Unable to decode the supplied video URL. "
+            "Confirm the URL returns a supported video file, not HTML."
+        ) from error
+    if not destination.exists() or destination.stat().st_size == 0:
+        raise RuntimeError("The supplied video contained no decodable frames.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source-mode", choices=("image", "continue-last", "video-url"),
+        required=True,
+    )
+    parser.add_argument(
+        "--input", default="", help="Image URL/path, or direct video URL"
+    )
+    parser.add_argument("--workflow-file", choices=tuple(WORKFLOWS), required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--current-run-id", type=int, required=True)
+    parser.add_argument("--output", type=Path, default=Path("inputs/downloaded_image"))
+    args = parser.parse_args()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository):
+        parser.error("Invalid owner/repository name")
+    try:
+        if args.source_mode == "image":
+            if not args.input.strip():
+                parser.error("Image mode requires a direct image URL or repo file path.")
+            command([
+                sys.executable, str(Path(__file__).with_name("prepare_input.py")),
+                "--image", args.input.strip(), "--output", args.output,
+            ])
+        elif args.source_mode == "continue-last":
+            latest_frame(
+                args.repository, args.workflow_file,
+                args.current_run_id, args.output,
+            )
+        else:
+            if not args.input.strip():
+                parser.error("Video URL mode requires a direct video file URL.")
+            with tempfile.TemporaryDirectory(prefix="remote_video_") as directory:
+                video_file = Path(directory) / "video_input"
+                frame = Path(directory) / "last_frame.png"
+                download_video(args.input.strip(), video_file)
+                extract_last_video_frame(video_file, frame)
+                shutil.copyfile(frame, args.output)
+        if not args.output.is_file() or args.output.stat().st_size == 0:
+            raise RuntimeError("No input image was resolved.")
+        print(f"Prepared next scene's source image: {args.output}", flush=True)
+    except (RuntimeError, subprocess.CalledProcessError, ValueError) as error:
+        parser.exit(1, f"Input resolution failed: {error}\n")
+
+
+if __name__ == "__main__":
+    main()
