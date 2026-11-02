@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v3).
+"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v4).
 
 Guidance is opt-in to preserve Phase 2's low-memory baseline:
   base         one img2img reference or text-to-image
@@ -118,17 +118,42 @@ def main():
         pipeline.set_adapters(lora_names, adapter_weights=[0.75] * len(lora_names))
         print(f"Loaded {len(lora_names)} registered character LoRA(s)", flush=True)
 
+    cached_ip_embeds = None
     if use_ip:
-        from transformers import CLIPVisionModelWithProjection
-        # ViT-H image encoder matches the selected IP-Adapter Plus checkpoint.
-        encoder = CLIPVisionModelWithProjection.from_pretrained(
-            IP_ADAPTER_REPO, subfolder="models/image_encoder",
-            torch_dtype=dtype,
-        )
-        pipeline.image_encoder = encoder
+        # Reuse SHA-bound safe-tensor cache for one reference; multiple
+        # references still use the canonical Diffusers image encoder.
+        if len(ip_refs) == 1:
+            from safetensors import safe_open
+            from safetensors.torch import load_file
+            ref = ip_refs[0]
+            name = "characters" if ref["kind"] == "character" else "scenes"
+            cached_path = (
+                root / "assets" / name / ref["asset_id"] / "embeds" /
+                f"{ref['sha256'][:20]}-ip-plus-v1.safetensors"
+            )
+            if cached_path.is_file():
+                with safe_open(str(cached_path), framework="pt", device="cpu") as sf:
+                    meta = sf.metadata() or {}
+                if (meta.get("reference_sha256") == ref["sha256"] and
+                    meta.get("ip_adapter_weight") == IP_WEIGHT and
+                    meta.get("base_model") == MODEL and
+                    meta.get("model_revision") == MODEL_REVISION and
+                    meta.get("classifier_free_guidance") == "true"):
+                    data = load_file(str(cached_path), device="cpu")
+                    cached_ip_embeds = [data[k] for k in sorted(data) if k.startswith("embed_")]
+                    if not cached_ip_embeds:
+                        raise RuntimeError("Cached reference contains no image embeddings")
+                    print(f"Reusing verified cache: {cached_path.relative_to(root)}", flush=True)
+        if cached_ip_embeds is None:
+            from transformers import CLIPVisionModelWithProjection
+            encoder = CLIPVisionModelWithProjection.from_pretrained(
+                IP_ADAPTER_REPO, subfolder="models/image_encoder",
+                torch_dtype=dtype,
+            )
+            pipeline.register_modules(image_encoder=encoder)
         pipeline.load_ip_adapter(
-            IP_ADAPTER_REPO, subfolder="sdxl_models",
-            weight_name=IP_WEIGHT,
+            IP_ADAPTER_REPO, subfolder="sdxl_models", weight_name=IP_WEIGHT,
+            image_encoder_folder=None if cached_ip_embeds is not None else "models/image_encoder",
         )
         pipeline.set_ip_adapter_scale(0.55)
         print(f"IP-Adapter: {len(ip_refs)} saved character/scene references", flush=True)
@@ -164,13 +189,11 @@ def main():
         init_image.save(args.output_dir / "conditioning_input.png")
 
     ip_images = []
-    if use_ip:
+    if use_ip and cached_ip_embeds is None:
         for ref in ip_refs:
             p = verified_image(root, ref)
-            ip_images.append(fit_reference(p, plan["width"], plan["height"]))
-        # One IP-Adapter loaded; its supported nested list is a set of
-        # image prompts, not multiple differently weighted adapter slots.
-        # Multiple same-adapter images are averaged, not spatially assigned.
+            with Image.open(p) as source:
+                ip_images.append(source.convert("RGB"))
         ip_images = [ip_images] if len(ip_images) > 1 else ip_images[0]
 
     canny = None
@@ -207,7 +230,10 @@ def main():
                 options.update(width=plan["width"], height=plan["height"])
             options["controlnet_conditioning_scale"] = 0.65
         if use_ip:
-            options["ip_adapter_image"] = ip_images
+            if cached_ip_embeds is not None:
+                options["ip_adapter_image_embeds"] = cached_ip_embeds
+            else:
+                options["ip_adapter_image"] = ip_images
         print(f"Generating candidate {number}/{plan['candidates']} "
               f"with {mode}, seed={seed}", flush=True)
         with torch.inference_mode():
