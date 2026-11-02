@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v8
+# AI Anime Story Generator — v9
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -13,12 +13,11 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Prepare or finalize distributed CPU character LoRA (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/train-character-lora.yml) | Prepare a request for the separate multi-runner CPU training network; verify and register the returned private LoRA only after training finishes |
 | [Publish anime comic pages and storyboard (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/publish-storyboard.yml) | Generate permanent comic-page PNGs, a CBZ comic and storyboard ZIP from approved images |
 | [Export or send selected anime shot to video generator (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/send-shot-to-video.yml) | Export a commit-pinned selected shot or dispatch a video generator in this same repository |
-| [Generate Wan 2.2 Turbo anime scene (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-wan22-ti2v-turbo.yml) | Generate a prompt-directed video from a character image, private-gallery URL, or previous Wan clip |
-| [Generate SVD-XT video (v8)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-svd-xt.yml) | Generate an SVD-XT video from an image, private-gallery URL or previous SVD clip |
-| [Smooth or speed up anime video (RIFE AI) (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
+| [Generate Wan 2.2 Turbo anime scene (v6)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-wan22-ti2v-turbo.yml) | Generate a prompt-directed video from a character image, private-gallery URL, or previous Wan clip |
+| [Smooth or speed up anime video (RIFE AI) (v3)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
 | [Assemble anime movie from scenes (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
 
-**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)**.
+**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)** · **[Automatic Wan chains](docs/WAN-AUTOMATIC-CHAINS-v1.md)**.
 
 ## Private gallery image input (repaired)
 
@@ -33,6 +32,18 @@ The gallery's one-image commit page (`/commit/8e3d426698edfb8d4a3535767dddf437d1
 **Authentication:** The original advised Actions secret **`VIDEO_REPO_TOKEN` is supported and preferred**. It must be accessible to the **`ai-anime-generator` repository** under Settings → Secrets and variables → Actions (or be an organization secret enabled for that repo). Storing it in the old `ai-video-generator` repository alone does not make it available to the new one. Its fine-grained token must include the private `anime-productions-love/gallery` repository with at least Contents:read. You do not need another token or secret name if `VIDEO_REPO_TOKEN` is already accessible to the consolidated repo. Other existing gallery token names remain supported.
 
 The earlier failed Wan run 41477592109 did **not** receive any of the secret names then wired into its workflow; code has since been repaired to pass `VIDEO_REPO_TOKEN`. No gallery credentials are sent to external media hosts.
+
+## Unattended multi-clip Wan scene chains
+
+Create or edit a single [JSON scene plan](chains/example-anime-sequence-v1.json) in the repo's `chains/` folder. It defines the initial gallery image, a prompt for every clip, frame counts, FPS, dimensions, seeds, optional repeat counts, and final movie output settings.
+
+Then open [Generate Wan 2.2 Turbo anime scene (v6)](.github/workflows/generate-wan22-ti2v-turbo.yml), set `chain_plan=chains/example-anime-sequence-v1.json`, leave `chain_step=1`, `chain_previous_run` and `chain_id` blank, and click **Run workflow just once**. Other single-video settings are ignored for this mode.
+
+Each generated clip is an **independent GitHub Actions run** (350-minute per-run job timeout) that takes the exact last frame from its predecessor artifact, preserves a SHA-verified chain state, and automatically dispatches the next clip. The final clip automatically requests the existing movie assembler to stitch all clips in order. A failed clip stops the chain without skipping; earlier finished artifacts stay available until their 7-day retention expires.
+
+No Cloudflare Worker or GPU required. You can use private gallery files through the configured `VIDEO_REPO_TOKEN`. For longer completed movies, the [interpolation workflow](.github/workflows/enhance-anime-video.yml) now recognizes assembled movie run IDs. See the **[complete automatic chain guide v1](docs/WAN-AUTOMATIC-CHAINS-v1.md)** for planning, recovery and runtime limitations.
+
+**Status:** Source installed and committed, but no actual chain or automated handoff has been executed or verified yet.
 
 ## Quick start: make a short illustrated anime sequence
 
@@ -94,11 +105,10 @@ scripts/distributed_lora.py               Distributed CPU request, provenance ve
 stories/<story>/sequences/<sequence>/     Canonical storyboard, comic exports and video receipts
 scripts/assemble_storyboard.py               Comic PNG pages, CBZ and storyboard ZIP exporter (v2)
 scripts/video_handoff.py                     Verified shot URL and same-repo Wan/SVD dispatch (v3)
-scripts/interpolate_video.py                  RIFE AI / FFmpeg optical-flow smoothing + retiming (v1)
+scripts/interpolate_video.py                  RIFE AI / FFmpeg optical-flow smoothing + retiming (v2)
 scripts/generate_wan22.py                      Wan 2.2 Turbo CPU video generation
-scripts/generate.py                            SVD-XT CPU video generation
 scripts/assemble_movie.py                     Join original or interpolated MP4 clips
-.github/workflows/enhance-anime-video.yml     Standalone AI frame interpolation and playback speed (v1)
+.github/workflows/enhance-anime-video.yml     Standalone AI frame interpolation and playback speed (v3)
 .github/workflows/assemble-anime-movie.yml    Mixed original/interpolated clip assembly (v4)
 .github/workflows/publish-storyboard.yml     Comic and storyboard publishing (v1)
 .github/workflows/send-shot-to-video.yml     Export-only or same-repository video generation handoff (v2)
@@ -106,6 +116,9 @@ schemas/                                  Versioned character/scene/shot JSON co
 docs/PHASE3-SETUP-v3.md                   Phase 3 guide with distributed CPU training integration
 docs/PHASE4-SETUP-v1.md                   Phase 4 comic/storyboard/video guide
 docs/VIDEO-INTERPOLATION-SETUP-v1.md       CPU frame interpolation, smoothing and adjustable speed
+scripts/wan_chain.py                         WAN clip chaining, verified exact last-frame handoff (v1)
+chains/example-anime-sequence-v1.json       Editable full-scene production plan (v1)
+docs/WAN-AUTOMATIC-CHAINS-v1.md            Automatic multi-day production and recovery instructions (v1)
 ```
 
 ## Verification and scope
