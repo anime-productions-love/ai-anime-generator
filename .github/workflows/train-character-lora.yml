@@ -1,0 +1,143 @@
+# Train a reusable SDXL character LoRA on an OWNER-PROVIDED GPU runner (v1).
+# Standard free GitHub-hosted CPU runners are NOT adequate for this step.
+name: Train character LoRA (GPU runner) (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      character_id:
+        description: "Existing saved character ID with at least three reference images"
+        type: string
+        required: true
+      hf_model_repo:
+        description: "Hugging Face destination repo, namespace/model-name"
+        type: string
+        required: true
+      training_steps:
+        description: "Training optimization steps; 100-1200"
+        type: number
+        required: true
+        default: 300
+      resolution:
+        description: "Training square crop resolution (512 or 768 recommended)"
+        type: number
+        required: true
+        default: 512
+      lora_rank:
+        description: "LoRA rank, 4-32"
+        type: number
+        required: true
+        default: 8
+
+permissions:
+  contents: write
+
+concurrency:
+  group: anime-library-writes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    # Must be an explicitly provisioned self-hosted Linux x64 runner
+    # labeled "gpu" with compatible NVIDIA CUDA/PyTorch drivers.
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 350
+    env:
+      HF_HOME: ${{ runner.temp }}/hf-anime-training
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      CHARACTER_ID: ${{ inputs.character_id }}
+      HF_MODEL_REPO: ${{ inputs.hf_model_repo }}
+      TRAINING_STEPS: ${{ inputs.training_steps }}
+      TRAINING_RESOLUTION: ${{ inputs.resolution }}
+      LORA_RANK: ${{ inputs.lora_rank }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout canonical character library
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare versioned character reference dataset
+        run: |
+          python3 scripts/prepare_lora_dataset.py \
+            --character-id "$CHARACTER_ID" \
+            --destination work/character-training
+
+      - name: Install upstream DreamBooth LoRA trainer
+        run: |
+          set -euo pipefail
+          python3 -m pip install --no-cache-dir 'torch>=2.3,<3' \
+            'torchvision>=0.18,<1' \
+            'diffusers==0.35.2' \
+            'transformers==4.57.1' \
+            'accelerate==1.11.0' \
+            'huggingface-hub==0.36.0' \
+            'peft>=0.17,<0.19' \
+            'safetensors==0.8.0' \
+            'ftfy' 'tensorboard' 'Jinja2'
+          git clone --depth 1 --branch v0.35.2 \
+            https://github.com/huggingface/diffusers.git work/diffusers-training
+          python3 -c 'import torch; assert torch.cuda.is_available(), "CUDA GPU not available on self-hosted runner"'
+
+      - name: Train SDXL character LoRA using upstream Diffusers
+        run: |
+          set -euo pipefail
+          if [[ ! "$TRAINING_STEPS" =~ ^[0-9]+$ ]] || (( TRAINING_STEPS < 100 || TRAINING_STEPS > 1200 )); then
+            echo "::error::training_steps must be 100-1200"; exit 1
+          fi
+          if [[ ! "$TRAINING_RESOLUTION" =~ ^[0-9]+$ ]] || (( TRAINING_RESOLUTION < 256 || TRAINING_RESOLUTION > 1024 || TRAINING_RESOLUTION % 8 != 0 )); then
+            echo "::error::resolution must be a multiple of 8, 256-1024"; exit 1
+          fi
+          if [[ ! "$LORA_RANK" =~ ^[0-9]+$ ]] || (( LORA_RANK < 4 || LORA_RANK > 32 )); then
+            echo "::error::lora_rank must be 4-32"; exit 1
+          fi
+          accelerate launch --mixed_precision fp16 \
+            work/diffusers-training/examples/dreambooth/train_dreambooth_lora_sdxl.py \
+            --pretrained_model_name_or_path cagliostrolab/animagine-xl-3.1 \
+            --revision 483f0c322568ed13697ed01dd0be07204746d12b \
+            --instance_data_dir work/character-training \
+            --instance_prompt "anime illustration of $CHARACTER_ID person" \
+            --output_dir work/lora-output \
+            --resolution "$TRAINING_RESOLUTION" \
+            --train_batch_size 1 \
+            --gradient_accumulation_steps 4 \
+            --gradient_checkpointing \
+            --rank "$LORA_RANK" \
+            --learning_rate 1e-4 \
+            --lr_scheduler constant \
+            --lr_warmup_steps 0 \
+            --max_train_steps "$TRAINING_STEPS" \
+            --report_to tensorboard
+
+      - name: Upload trained weights to private Hugging Face model repository
+        run: |
+          python3 scripts/publish_lora.py \
+            --character-id "$CHARACTER_ID" \
+            --hf-repo "$HF_MODEL_REPO" \
+            --weights work/lora-output/pytorch_lora_weights.safetensors
+
+      - name: Register successful character LoRA in canonical character manifest
+        run: |
+          python3 scripts/library.py register-lora \
+            --kind character \
+            --id "$CHARACTER_ID" \
+            --hub-repo "$HF_MODEL_REPO"
+
+      - name: Commit LoRA registry update (not model weights)
+        run: |
+          set -euo pipefail
+          git add -- assets/characters
+          if git diff --cached --quiet; then
+            echo "Registered LoRA was already present in manifest."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Character LoRA registry v1: $CHARACTER_ID"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
