@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v3
+# AI Anime Story Generator — v4
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, and continuity-controlled storyboards**. The repo contains three layers: Phase 1 persistent library, Phase 2 SDXL shot generation, and Phase 3 optional trained character LoRAs, reference-image conditioning, structural guidance, and continuity evaluation.
 
@@ -12,7 +12,7 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Cache anime reference embedding (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/cache-reference-embedding.yml) | Save safe, SHA-bound IP-Adapter Plus embeddings for one character/scene reference |
 | [Train character LoRA (GPU runner) (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/train-character-lora.yml) | Train a reusable character LoRA using an **owner-provisioned self-hosted GPU** and upload weights to a private Hugging Face model repo |
 
-**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v1.md)**.
+**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v2.md)**.
 
 ## Quick start: make a short illustrated anime sequence
 
@@ -50,14 +50,14 @@ assets/scenes/<id>/manifest.json          Canonical environment identity and ref
 assets/styles/                            Stable style presets
 scripts/library.py                        Character/scene management and LoRA registration (v2)
 scripts/story.py                          Shot planning, inheritance and publication (v2)
-scripts/generate_shot.py                  SDXL, IP-Adapter, ControlNet and LoRA inference (v4)
+scripts/generate_shot.py                  SDXL, IP-Adapter, ControlNet and LoRA inference (v5)
 scripts/evaluate_continuity.py            Advisory reference-image similarity scorer (v1)
 scripts/build_ip_embeddings.py            Safe reference embedding precomputation (v1)
 scripts/prepare_lora_dataset.py           Verified training image packaging (v1)
-scripts/publish_lora.py                   Private Hugging Face LoRA publication (v1)
+scripts/publish_lora.py                   Private Hugging Face LoRA publication (v2)
 stories/<story>/sequences/<sequence>/     Persistent storyboard images and manifests
 schemas/                                  Versioned character/scene/shot JSON contracts
-docs/PHASE3-SETUP-v1.md                   Phase 3 guide, installation and limitations
+docs/PHASE3-SETUP-v2.md                   Phase 3 guide, installation and limitations
 ```
 
 ## Verification and scope
