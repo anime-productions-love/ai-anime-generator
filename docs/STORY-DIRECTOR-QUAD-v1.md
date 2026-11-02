@@ -1,4 +1,4 @@
-# Four-Runner Anime Story Director — v1
+# Four-Runner Anime Story Director — v2
 
 ## Purpose and current status
 
@@ -54,27 +54,43 @@ The fallback requires a usable `/dev/fuse` in the hosted runner; if GitHub prohi
 
 In the fallback, the provider-supplied pinned file digest is verified but a **full local downloaded byte stream SHA-256 is not computed**, since no full local file is present. This is weaker than the direct-download integrity check. This fallback is source-installed but has not been verified under live GitHub runner conditions. It may be slow and sensitive to CDN range performance.
 
-## How to launch a Story Director draft
+## Unrestricted episode planning — episode → scenes → clips
 
-Open [Anime Story Director four-runner AI](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/anime-story-director-quad-v1.yml), select `main` then **Run workflow**.
+An **episode** is an ordered series of **scenes**. Each scene contains a director-chosen number of continuous **clips**. There is **no creative minimum/maximum scene count or clip count per scene**. Every scene may have its own location, cast, framing and **operator-approved first image**. Within a scene, the second and later video clips inherit the verified exact final frame of their immediately preceding clip. Episode-level assembly is a separate process; source-installed Story Director does **not** automatically dispatch expensive Wan renders or assemble the final episode.
 
-Choose the model (Muse for creative writing, Qwen3.8 for structured film planning, Qwen3.6 for possible token-throughput efficiency), and provide:
+The AI plan is generated through two **resumable** stages using the existing four-runner workflow. Resource-limited inference requests process at most **8 scene outlines** or **10 detailed clip prompts** at a time, but those numbers are *only technical per-request batch sizes*, **not upper bounds on episode length**. The script writes the source-bound progress draft after each response and can be continued by launching the same stage with `resume_run`. Each hosted run may use up to 205 minutes for planning before saving a partial draft; the overall episode can continue in subsequent runs.
 
-- Story text (10–16,000 characters) or an existing `stories/...` source file path.
-- Proposed number of clips (2–33), frames per clip, FPS.
-- Optional animation style and character IDs from the existing anime character library.
+### Stage 1 — Outline the full episode
 
-Each job produces a **draft, not an approved movie production**. The output artifact is `anime-story-director-draft-v1-<run-id>`. Its JSON includes the model identity and immutable revision, source SHA, creative notes, intended video prompts and a clear unapproved status. Invalid or truncated model output is saved as raw response with a failure-to-parse marker; clips are **never fabricated** to produce artificial success.
+1. Open [Anime Story Director quad workflow](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/anime-story-director-quad-v1.yml).
+2. Choose branch `main` and the desired model. Muse Glimmer is the creative-writing option; Qwen3.8 or Qwen3.6 are production-oriented options.
+3. Set `stage=episode`, `scenes=0` (director chooses how many). A positive scene count is an *optional creative preference*, not a system limit.
+4. Supply the story as `story_text` or point to an existing `stories/...` `story_file`. Set the same intended frames/FPS/style/character IDs that will guide rendering.
+5. Run the workflow only when you authorize inference execution. The result `anime-story-director-draft-v1-<run-id>` contains `source-plan.json` and `story-draft-v1.json` with the ordered episode scenes, suggested clip counts and starting-image briefs.
+6. If `status=DRAFT_PARTIAL_CONTINUATION_AVAILABLE`, run `stage=episode` again with `resume_run` set to the previous workflow run ID; the prior draft is retrieved from the exact run's artifact, and the planning continues from the next scene.
 
-There is no automatic direct rendering, approval bypass, or change to your current Wan video chain. The Story Director's draft must be reviewed before conversion into a frozen production plan.
+### Stage 2 — Generate detailed clips for any chosen scene
 
-**Privacy warning:** `ai-anime-generator` is a public repository. Do not submit unpublished private manuscripts through GitHub Actions workflow inputs, GitHub repository files or public artifacts. The Cloudflare console's authenticated private-story upload and approved-draft handoff are separate future integration tasks and are **not** implemented by this release.
+1. Start the **same workflow** with `stage=scene`.
+2. Enter `episode_run` = the complete episode-outline run ID and `scene_index` = the ordinal index of the scene you want to detail.
+3. Choose any of the three installed models; scene detail can use a different model from the earlier creative outline while preserving the episode's story SHA and character/environment bible.
+4. The director writes a sequential prompt for every clip of that scene, preserving previous-frame inheritance and fixed technical settings. There is no cap on the scene's total clip count.
+5. If the detail stage is partial, repeat the same `episode_run` and `scene_index` with `resume_run` pointing to the partial scene-detail run. Do not change the model while *resuming that same detail stage*.
+6. Review the detailed clips and the operator-selected starting image before authorizing rendering. Repeat for the remaining scenes.
+
+Both the source plan and the actual draft are also configured to archive into private `anime-productions-love/gallery` release assets using the generator's `VIDEO_REPO_TOKEN` (**Contents:write** required). Archiving is triggered after successful artifact upload; archive failure does not imply successful gallery preservation.
+
+### Rendering and assembly boundaries
+
+The existing Wan scene chain accepts **2–33 video clips per technical generation plan**. This limit remains in that *existing execution mechanism*, not the Story Director's creative plan. A scene with more clips must be broken into sequential rendering batches with the verified final frame explicitly carried into the next batch; a one-clip scene can use single-video mode. Automatic continuation *across separate scene-render batches* and hierarchical final episode assembly **have not yet been connected**. Do not interpret an approved episode outline as a successfully rendered episode.
+
+**Privacy:** `ai-anime-generator` is a public repository. Do not put private unpublished manuscripts into public workflow inputs or repository files. The resulting temporary Actions artifact is not a substitute for an authorized private storage path. The Cloudflare private-story UI is a separate integration task and not part of this release.
 
 ## Files
 
-- `.github/workflows/anime-story-director-quad-v1.yml` — quad inference workflow v4, source filename remains v1 for backward-compatible future updates.
+- `.github/workflows/anime-story-director-quad-v1.yml` — quad inference workflow v7, source filename remains v1 for backward-compatible future updates.
 - `scripts/story-director/models-v1.json` — the three selectable GGUF definitions with registered SHA-256.
-- `scripts/story-director/director-v1.py` — v2 bounded prompt construction, model download, draft generation and provenance.
+- `scripts/story-director/director-v1.py` — v5 episode/scene incremental drafting, bounded requests, model download and provenance.
 - `scripts/story-director/rendezvous-v1.py` — v1 exact rank rendezvous and completion monitoring.
 - `scripts/story-director/join-tailnet-v1.sh` — v1 reuse of the prior ephemeral Tailscale OIDC connection.
 - `scripts/story-director/remote-gguf-v1.py` — v1 HTTP-range/FUSE fallback for insufficient coordinator SSD.
