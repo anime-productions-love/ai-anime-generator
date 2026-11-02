@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v4).
+"""Animagine XL CPU story illustration inference with optional Phase 3 guides (v5).
 
 Guidance is opt-in to preserve Phase 2's low-memory baseline:
   base         one img2img reference or text-to-image
@@ -200,8 +200,21 @@ def main():
     if use_control:
         if control_record:
             path = verified_image(root, control_record)
-            control_source = fit_reference(path, plan["width"], plan["height"])
-            canny = control_source if control_record["role"] == "canny" else edge_guide(control_source)
+            with Image.open(path) as source:
+                control_source = source.convert("RGB")
+            # Structural guides must not be blurred as if they were
+            # conditioning artwork. Preserve the full map in black padding.
+            control_fitted = ImageOps.contain(
+                control_source, (plan["width"], plan["height"]),
+                Image.Resampling.LANCZOS,
+            )
+            control_canvas = Image.new("RGB", (plan["width"], plan["height"]), (0, 0, 0))
+            control_canvas.paste(
+                control_fitted,
+                ((plan["width"] - control_fitted.width) // 2,
+                 (plan["height"] - control_fitted.height) // 2),
+            )
+            canny = control_canvas if control_record["role"] == "canny" else edge_guide(control_canvas)
         else:
             canny = edge_guide(init_image)
         canny.save(args.output_dir / "control_canny.png")
