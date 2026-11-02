@@ -1,0 +1,217 @@
+# Four concurrent CPU workers, one model per draft; v1. Not a training workflow.
+name: Anime Story Director four-runner AI (v1)
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Select Story Director model
+        type: choice
+        required: true
+        default: muse-glimmer-30b
+        options:
+          - muse-glimmer-30b
+          - qwen3.8-27b
+          - qwen3.6-35b-a3b
+      story_text:
+        description: Non-confidential story outline only (public repository)
+        type: string
+        default: ""
+      story_file:
+        description: Optional already checked-in stories/... file
+        type: string
+        default: ""
+      clips:
+        description: How many shots should AI plan (2 to 33)
+        type: number
+        default: 8
+      frames:
+        description: Fixed Wan frames for each shot
+        type: number
+        default: 42
+      fps:
+        description: Fixed Wan FPS for each shot
+        type: number
+        default: 4
+      style:
+        description: Character continuity and cinematographic style
+        type: string
+        default: cinematic anime with consistent character identity
+      character_ids:
+        description: Character IDs in the existing anime library
+        type: string
+        default: ""
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: story-director-${{ github.ref }-${{ github.run_id }
+  cancel-in-progress: false
+jobs:
+  distributed-inference:
+    name: Story Director node ${{ matrix.rank }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: true
+      matrix:
+        rank: [0, 1, 2, 3]
+    env:
+      PYTHONUNBUFFERED: "1"
+      LLAMA_COMMIT: 4c1a0af40d88c7fbb3b15c85bf2e8016d1d5b64c
+      STORY_MODEL: ${{ inputs.model }
+      GGML_RPC_NO_RDMA: "1"
+    steps:
+      - name: Checkout Story Director and models registry
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install CPU build and transfer dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build libcurl4-openssl-dev jq curl
+          python3 --version
+
+      - name: Restore pinned CPU llama.cpp RPC build
+        id: engine_cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }/story-llama-src
+            ${{ runner.temp }/story-llama-build
+          key: story-director-llama-b10430-cpu-rpc-ubuntu24-v1
+
+      - name: Build pinned llama.cpp with CPU RPC enabled
+        if: steps.engine_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/story-llama-src"
+          git -C "$RUNNER_TEMP/story-llama-src" fetch --quiet --depth=1 origin "$LLAMA_COMMIT"
+          git -C "$RUNNER_TEMP/story-llama-src" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/story-llama-src" rev-parse HEAD)" = "$LLAMA_COMMIT"
+          cmake -S "$RUNNER_TEMP/story-llama-src" -B "$RUNNER_TEMP/story-llama-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_RPC=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_NATIVE=OFF
+          cmake --build "$RUNNER_TEMP/story-llama-build" --parallel 4 --target llama-server ggml-rpc-server
+
+      - name: Join private Tailscale with GitHub OIDC
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }
+          TAILNET_TAG: tag:ai-training
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Set TS_OAUTH_CLIENT_ID in anime-generator and authorize its GitHub OIDC repo in your tailnet policy"; exit 1; }
+          bash scripts/story-director/join-tailnet-v1.sh
+
+      - name: Start three private remote CPU inference services
+        if: matrix.rank != 0
+        shell: bash
+        env:
+          RPC_RANK: ${{ matrix.rank }
+        run: |
+          set -euo pipefail
+          ip="$(tailscale ip -4 | head -n 1)"
+          [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          nohup "$RUNNER_TEMP/story-llama-build/bin/ggml-rpc-server" --host "$ip" --port 50052 > "$RUNNER_TEMP/story-rpc-server.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/story-rpc-server.pid"
+          sleep 3
+          kill -0 "$(cat "$RUNNER_TEMP/story-rpc-server.pid")" || { tail -n 80 "$RUNNER_TEMP/story-rpc-server.log"; exit 1; }
+          python3 scripts/story-director/rendezvous-v1.py announce --rank "$RPC_RANK" --address "$ip" --model "$STORY_MODEL" --run-id "$GITHUB_RUN_ID" --output "$RUNNER_TEMP/rpc-peer/rendezvous.json"
+
+      - name: Publish exact private RPC peer receipt
+        if: matrix.rank != 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-director-rpc-v1-${{ github.run_id }-rank-${{ matrix.rank }
+          path: ${{ runner.temp }/rpc-peer/rendezvous.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Maintain private CPU workers until coordinator completes
+        if: matrix.rank != 0
+        env:
+          GH_TOKEN: ${{ github.token }
+        run: |
+          python3 scripts/story-director/rendezvous-v1.py monitor --run-id "$GITHUB_RUN_ID"
+
+      - name: Retrieve three matching private RPC peers
+        if: matrix.rank == 0
+        env:
+          GH_TOKEN: ${{ github.token }
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/story-director/rendezvous-v1.py collect --run-id "$GITHUB_RUN_ID" --model "$STORY_MODEL" --destination "$RUNNER_TEMP/story-rendezvous" --output "$RUNNER_TEMP/story-rpc-addresses.txt"
+          IFS=, read -ra peers < "$RUNNER_TEMP/story-rpc-addresses.txt"
+          test "${#peers[@]}" -eq 3
+          for peer in "${peers[@]}"; do
+            tailscale ping --c=1 --timeout=10s "${peer%:*}" >/dev/null || { echo "::error::Remote RPC node disconnected"; exit 1; }
+          done
+
+      - name: Prepare source-bound draft-only story instructions
+        if: matrix.rank == 0
+        env:
+          DIRECTOR_STORY_TEXT: ${{ inputs.story_text }
+          STORY_FILE: ${{ inputs.story_file }
+          STORY_CLIPS: ${{ inputs.clips }
+          STORY_FRAMES: ${{ inputs.frames }
+          STORY_FPS: ${{ inputs.fps }
+          STORY_STYLE: ${{ inputs.style }
+          STORY_CHARACTERS: ${{ inputs.character_ids }
+        run: |
+          python3 scripts/story-director/director-v1.py prepare --model "$STORY_MODEL" --story-file "$STORY_FILE" --clips "$STORY_CLIPS" --frames "$STORY_FRAMES" --fps "$STORY_FPS" --style "$STORY_STYLE" --characters "$STORY_CHARACTERS" --output "$RUNNER_TEMP/story-input/source-plan.json"
+
+      - name: Reclaim disposable SDKs on model-loading coordinator
+        if: matrix.rank == 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/.ghcup
+          df -h "$RUNNER_TEMP"
+
+      - name: Download and SHA-verify selected pinned GGUF model
+        if: matrix.rank == 0
+        run: |
+          python3 scripts/story-director/director-v1.py download --model "$STORY_MODEL" --destination "$RUNNER_TEMP/story-model"
+
+      - name: Start isolated four-device llama.cpp RPC inference
+        if: matrix.rank == 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          model="$(find "$RUNNER_TEMP/story-model" -maxdepth 1 -name '*.gguf' -type f -print -quit)"
+          test -n "$model"
+          rpc="$(cat "$RUNNER_TEMP/story-rpc-addresses.txt")"
+          "$RUNNER_TEMP/story-llama-build/bin/llama-server" --model "$model" --rpc "$rpc" --n-gpu-layers 99 --ctx-size 8192 --threads 4 --parallel 1 --host 127.0.0.1 --port 8080 > "$RUNNER_TEMP/story-llama-server.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/story-llama-server.pid"
+          ready=0
+          for i in $(seq 1 240); do
+            if curl -fsS --max-time 5 http://127.0.0.1:8080/health | jq -e '.status == "ok"' >/dev/null 2>&1; then ready=1; break; fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/story-llama-server.pid")" 2>/dev/null; then tail -n 60 "$RUNNER_TEMP/story-llama-server.log"; exit 1; fi
+            sleep 5
+          done
+          if [ "$ready" != 1 ]; then echo "::error::Distributed llama.cpp failed to become ready"; tail -n 60 "$RUNNER_TEMP/story-llama-server.log"; exit 1; fi
+
+      - name: Generate human-review draft from selected AI on four runners
+        if: matrix.rank == 0
+        run: |
+          python3 scripts/story-director/director-v1.py infer --model "$STORY_MODEL" --plan "$RUNNER_TEMP/story-input/source-plan.json" --provenance "$RUNNER_TEMP/story-model/model-provenance-v1.json" --output "$RUNNER_TEMP/story-output/story-draft-v1.json"
+
+      - name: Upload draft, not an approved production plan
+        if: matrix.rank == 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-story-director-draft-v1-${{ github.run_id }
+          path: ${{ runner.temp }/story-output/story-draft-v1.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize disposition
+        if: matrix.rank == 0
+        shell: bash
+        run: |
+          echo "Story Director draft generated. NOT approved and no Wan rendering dispatched." >> "$GITHUB_STEP_SUMMARY"
+          echo "Source/model digests are included in the saved draft receipt." >> "$GITHUB_STEP_SUMMARY"
