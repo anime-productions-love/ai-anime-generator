@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v9
+# AI Anime Story Generator — v10
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -17,7 +17,7 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Smooth or speed up anime video (RIFE AI) (v3)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
 | [Assemble anime movie from scenes (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
 
-**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)** · **[Automatic Wan chains](docs/WAN-AUTOMATIC-CHAINS-v1.md)**.
+**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)** · **[Automatic Wan chains](docs/WAN-AUTOMATIC-CHAINS-v2.md)**.
 
 ## Private gallery image input (repaired)
 
@@ -41,7 +41,7 @@ Then open [Generate Wan 2.2 Turbo anime scene (v6)](.github/workflows/generate-w
 
 Each generated clip is an **independent GitHub Actions run** (350-minute per-run job timeout) that takes the exact last frame from its predecessor artifact, preserves a SHA-verified chain state, and automatically dispatches the next clip. The final clip automatically requests the existing movie assembler to stitch all clips in order. A failed clip stops the chain without skipping; earlier finished artifacts stay available until their 7-day retention expires.
 
-No Cloudflare Worker or GPU required. You can use private gallery files through the configured `VIDEO_REPO_TOKEN`. For longer completed movies, the [interpolation workflow](.github/workflows/enhance-anime-video.yml) now recognizes assembled movie run IDs. See the **[complete automatic chain guide v1](docs/WAN-AUTOMATIC-CHAINS-v1.md)** for planning, recovery and runtime limitations.
+No Cloudflare Worker or GPU required. You can use private gallery files through the configured `VIDEO_REPO_TOKEN`. For longer completed movies, the [interpolation workflow](.github/workflows/enhance-anime-video.yml) now recognizes assembled movie run IDs. See the **[complete automatic chain guide v1](docs/WAN-AUTOMATIC-CHAINS-v2.md)** for planning, recovery and runtime limitations.
 
 **Status:** Source installed and committed, but no actual chain or automated handoff has been executed or verified yet.
 
@@ -105,7 +105,7 @@ scripts/distributed_lora.py               Distributed CPU request, provenance ve
 stories/<story>/sequences/<sequence>/     Canonical storyboard, comic exports and video receipts
 scripts/assemble_storyboard.py               Comic PNG pages, CBZ and storyboard ZIP exporter (v2)
 scripts/video_handoff.py                     Verified shot URL and same-repo Wan/SVD dispatch (v3)
-scripts/interpolate_video.py                  RIFE AI / FFmpeg optical-flow smoothing + retiming (v2)
+scripts/interpolate_video.py                  RIFE AI / FFmpeg optical-flow smoothing + retiming (v3)
 scripts/generate_wan22.py                      Wan 2.2 Turbo CPU video generation
 scripts/assemble_movie.py                     Join original or interpolated MP4 clips
 .github/workflows/enhance-anime-video.yml     Standalone AI frame interpolation and playback speed (v3)
@@ -116,9 +116,9 @@ schemas/                                  Versioned character/scene/shot JSON co
 docs/PHASE3-SETUP-v3.md                   Phase 3 guide with distributed CPU training integration
 docs/PHASE4-SETUP-v1.md                   Phase 4 comic/storyboard/video guide
 docs/VIDEO-INTERPOLATION-SETUP-v1.md       CPU frame interpolation, smoothing and adjustable speed
-scripts/wan_chain.py                         WAN clip chaining, verified exact last-frame handoff (v1)
+scripts/wan_chain.py                         WAN clip chaining, verified exact last-frame handoff (v2)
 chains/example-anime-sequence-v1.json       Editable full-scene production plan (v1)
-docs/WAN-AUTOMATIC-CHAINS-v1.md            Automatic multi-day production and recovery instructions (v1)
+docs/WAN-AUTOMATIC-CHAINS-v2.md            Automatic multi-day production and recovery instructions (v1)
 ```
 
 ## Verification and scope
