@@ -1,11 +1,11 @@
-# Post-process existing anime video; does not rerun Wan or SVD (v2).
-name: Smooth or speed up anime video (RIFE AI) (v2)
+# Post-process existing Wan or assembled anime movie without rerunning inference (v3).
+name: Smooth or speed up anime video (RIFE AI) (v3)
 
 on:
   workflow_dispatch:
     inputs:
       source_run:
-        description: "Completed Wan/SVD run ID (unified or old video repo); leave blank if using URL"
+        description: "Completed Wan or assembled movie run ID; blank for gallery/direct video URL"
         type: string
         required: false
       video_url:
@@ -136,7 +136,7 @@ jobs:
       - name: Upload enhanced MP4, final frame and timing metadata
         uses: actions/upload-artifact@v4
         with:
-          name: anime-smooth-video-v2-${{ github.run_id }}
+          name: anime-smooth-video-v3-${{ github.run_id }}
           path: |
             outputs/enhanced/video.mp4
             outputs/enhanced/last_frame.png
