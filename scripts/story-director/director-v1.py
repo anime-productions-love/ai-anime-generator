@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Four-runner Anime Story Director: verified models and draft-only episode planning (v4).
+"""Four-runner Anime Story Director: verified models and draft-only episode planning (v5).
 
 No training, no production dispatch and no unapproved model-authored writes.
 The workflow calls prepare/download/infer in order; model weights are sourced
@@ -250,8 +250,10 @@ def validate_clip(clip, index):
 
 def infer(args):
     plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
-    if args.model != plan["model"] or plan.get("kind") != "episode":
-        raise ValueError("Source episode/model identity mismatch")
+    if plan.get("kind") != "episode":
+        raise ValueError("Source is not an episode plan")
+    if args.stage == "episode" and args.model != plan["model"]:
+        raise ValueError("Episode continuation must retain the source model")
     role = registry_entry(args.model)["role"]
     persona = {
         "creative-director": CREATIVE,
@@ -306,9 +308,12 @@ def infer(args):
             # Eight scenes is an inference request/output budget, NOT a
             # maximum number of scenes in the episode.
             batch = min(8, preferred - n) if preferred else 8
+            # Keep total progress in the source-bound draft. Supplying
+            # the complete outline in every request would eventually
+            # exhaust the model context on long episodes.
             past = [{"index": item["index"], "title": item["title"],
                      "narrative_goal": item["narrative_goal"]}
-                    for item in episode["scenes"]]
+                    for item in episode["scenes"][-12:]]
             prompt = (
                 f"Storyboard the episode in chronological order. Next scene "
                 f"index: {n+1}; BATCH_SIZE={batch}. "
@@ -363,7 +368,6 @@ def infer(args):
             source = json.loads(Path(args.outline).read_text(encoding="utf-8"))
             if (source.get("stage") != "episode"
                 or source.get("prompt_source_sha256") != plan["story_sha256"]
-                or source.get("model") != args.model
                 or not source.get("episode")):
                 raise ValueError("Scene detail uses incorrect episode outline")
             scenes = source["episode"].get("scenes", [])
@@ -391,6 +395,8 @@ def infer(args):
                 f"{args.scene_index}. NEXT_CLIP={n+1}. "
                 f"Episode title: {source['episode']['title']}. "
                 f"Scene: {json.dumps(scene, ensure_ascii=False)}\n"
+                f"Character bible: {json.dumps(source['episode'].get('character_bible', {}), ensure_ascii=False)}\n"
+                f"Environment bible: {json.dumps(source['episode'].get('environment_bible', {}), ensure_ascii=False)}\n"
                 f"Episode continuity: {json.dumps(source['episode'].get('episode_continuity', []), ensure_ascii=False)}\n"
                 f"Previous clips in this scene: "
                 f"{json.dumps([{'index': x['index'], 'prompt': x['prompt']} for x in output_scene['clips'][-10:]], ensure_ascii=False)}\n"
