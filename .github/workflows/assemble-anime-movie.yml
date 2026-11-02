@@ -1,5 +1,5 @@
-# Compose already-generated Wan/SVD or interpolated clip artifacts (v5).
-name: Assemble anime movie from scenes (v5)
+# Compose already-generated Wan/SVD or interpolated clip artifacts (v6).
+name: Assemble anime movie from scenes (v6)
 
 on:
   workflow_dispatch:
@@ -24,13 +24,14 @@ on:
         default: 8
         required: true
       transition:
-        description: "Hard cut or fade to/from black between scenes"
+        description: "Cut, fade-black, or remove the duplicated inherited seam frame"
         type: choice
         default: cut
         required: true
         options:
           - cut
           - fade-black
+          - motion-seam
       fade_seconds:
         description: "Fade duration in seconds when using fade-black"
         type: string
@@ -41,10 +42,33 @@ on:
         type: number
         default: 20
         required: true
+      postprocess_enabled:
+        description: "Automatically smooth and retime entire movie after assembling"
+        type: boolean
+        default: false
+        required: true
+      postprocess_method:
+        description: "Interpolation: motion=streaming FFmpeg, rife=neural CPU"
+        type: choice
+        default: motion
+        options:
+          - motion
+          - rife
+        required: true
+      postprocess_fps:
+        description: "Finished movie FPS"
+        type: number
+        default: 24
+        required: true
+      postprocess_speed:
+        description: "Finished movie speed (1, 1.5, 2 etc)"
+        type: string
+        default: "1.5"
+        required: true
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 jobs:
   combine:
@@ -128,7 +152,7 @@ jobs:
       - name: Upload finished anime movie and scene timeline
         uses: actions/upload-artifact@v4
         with:
-          name: anime-movie-v5-${{ github.run_id }}
+          name: anime-movie-v6-${{ github.run_id }}
           path: |
             outputs/movie/movie.mp4
             outputs/movie/timeline.json
@@ -142,3 +166,23 @@ jobs:
         run: |
           python3 scripts/archive_gallery.py \
             --run-id "$GITHUB_RUN_ID" --kind movie --source outputs/movie
+
+      - name: Automatically start final movie interpolation after archive
+        if: ${{ inputs.postprocess_enabled }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          METHOD: ${{ inputs.postprocess_method }}
+          OUT_FPS: ${{ inputs.postprocess_fps }}
+          OUT_SPEED: ${{ inputs.postprocess_speed }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/enhance-anime-video.yml/dispatches" \
+            -f "ref=${GITHUB_REF_NAME}" \
+            -f "inputs[source_run]=${GITHUB_RUN_ID}" \
+            -f "inputs[source_repo]=unified" \
+            -f "inputs[method]=${METHOD}" \
+            -f "inputs[target_fps]=${OUT_FPS}" \
+            -f "inputs[playback_speed]=${OUT_SPEED}" \
+            -f "inputs[quality_crf]=20"
+          echo "Final interpolation dispatched; its success is verified by its own workflow."
