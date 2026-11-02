@@ -1,5 +1,5 @@
 # Four concurrent CPU workers, one model per draft; v1. Not a training workflow.
-name: Anime Story Director four-runner AI (v3)
+name: Anime Story Director four-runner AI (v4)
 on:
   workflow_dispatch:
     inputs:
@@ -66,6 +66,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Set up Python 3.11 for reproducible inference utilities
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Install CPU build and transfer dependencies
         shell: bash
@@ -223,7 +228,7 @@ jobs:
           model="$(find "$RUNNER_TEMP/story-model" -maxdepth 2 -name '*.gguf' -type f -print -quit)"
           test -n "$model"
           rpc="$(cat "$RUNNER_TEMP/story-rpc-addresses.txt")"
-          "$RUNNER_TEMP/story-llama-build/bin/llama-server" --model "$model" --alias "$STORY_MODEL" --rpc "$rpc" --n-gpu-layers 99 --ctx-size 8192 --threads 4 --parallel 1 --host 127.0.0.1 --port 8080 > "$RUNNER_TEMP/story-llama-server.log" 2>&1 &
+          "$RUNNER_TEMP/story-llama-build/bin/llama-server" --model "$model" --alias "$STORY_MODEL" --rpc "$rpc" --n-gpu-layers 99 --ctx-size 16384 --threads 4 --parallel 1 --host 127.0.0.1 --port 8080 > "$RUNNER_TEMP/story-llama-server.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/story-llama-server.pid"
           ready=0
           for i in $(seq 1 240); do
