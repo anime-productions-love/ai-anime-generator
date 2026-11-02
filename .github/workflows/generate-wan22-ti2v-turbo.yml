@@ -1,5 +1,5 @@
-# Wan2.2 TI2V-5B Turbo, single/automatic chained scenes on CPU (v8).
-name: Generate Wan 2.2 Turbo anime scene (v8)
+# Wan2.2 TI2V-5B Turbo, single/automatic chained scenes on CPU (v9).
+name: Generate Wan 2.2 Turbo anime scene (v9)
 
 on:
   workflow_dispatch:
@@ -263,29 +263,55 @@ jobs:
           python3 scripts/wan_chain.py record \
             --plan work/wan-chain-plan.json \
             --output-dir outputs/wan22
+          cp work/wan-chain-plan.json outputs/wan22/wan-chain-plan.json
 
       - name: Publish complete scene artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: wan22-turbo-v8-${{ github.run_id }}
+          name: wan22-turbo-v9-${{ github.run_id }}
           path: outputs/wan22/
           if-no-files-found: error
           retention-days: 7
 
-      - name: Archive every Wan output permanently in private gallery
-        if: success()
+  archive-and-advance:
+    needs: generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out archiving and chain tools
+        uses: actions/checkout@v4
+
+      - name: Retrieve only completed generation output from this exact run
+        uses: actions/download-artifact@v4
+        with:
+          name: wan22-turbo-v9-${{ github.run_id }}
+          path: outputs/wan22
+
+      - name: Verify completed video and previous chain receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find outputs/wan22 -type f -name video.mp4 | wc -l)" -eq 1
+          test "$(find outputs/wan22 -type f -name last_frame.png | wc -l)" -eq 1
+          if [[ -f outputs/wan22/chain-state.json ]]; then
+            test -s outputs/wan22/wan-chain-plan.json
+          fi
+
+      - name: Archive complete Wan output permanently to private gallery
         env:
           VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
         run: |
           python3 scripts/archive_gallery.py \
             --run-id "$GITHUB_RUN_ID" --kind wan --source outputs/wan22
 
-      - name: Dispatch next scene or final movie after uploading artifact
+      - name: Dispatch next scene or final movie only after gallery archive verification
         if: inputs.chain_plan != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p work
+          cp outputs/wan22/wan-chain-plan.json work/wan-chain-plan.json
           python3 scripts/wan_chain.py advance \
             --plan work/wan-chain-plan.json \
             --output-dir outputs/wan22
