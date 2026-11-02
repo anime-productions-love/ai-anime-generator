@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chain multiple Wan video scenes across separate GitHub Actions runs (v1).
+"""Chain multiple Wan video scenes across separate GitHub Actions runs (v2).
 
 Each run is a single <=350-minute Wan job; the uploaded previous run's
 last_frame.png seeds the next segment. A fixed JSON plan supplies all prompts.
@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 WAN_WORKFLOW = "generate-wan22-ti2v-turbo.yml"
@@ -213,12 +214,22 @@ def previous_artifact(plan, destination):
     repo = os.environ.get("GITHUB_REPOSITORY", "anime-productions-love/ai-anime-generator")
     if repo != "anime-productions-love/ai-anime-generator":
         fail("This chain belongs to the unified anime generator repository")
-    artifacts = gh_api(f"repos/{repo}/actions/runs/{prior}/artifacts?per_page=100")
-    matches = [
-        a for a in artifacts.get("artifacts", [])
-        if not a.get("expired") and ARTIFACT_PATTERN.fullmatch(a.get("name", ""))
-        and ARTIFACT_PATTERN.fullmatch(a["name"]).group(1) == str(prior)
-    ]
+    matches = []
+    # GitHub's artifact listing can lag briefly behind upload-artifact
+    # completion. Check only the specified predecessor, never an unrelated
+    # "latest successful" run. Give the freshly uploaded artifact time to
+    # become visible before treating it as a real failure.
+    for attempt in range(5):
+        artifacts = gh_api(f"repos/{repo}/actions/runs/{prior}/artifacts?per_page=100")
+        matches = [
+            a for a in artifacts.get("artifacts", [])
+            if not a.get("expired") and ARTIFACT_PATTERN.fullmatch(a.get("name", ""))
+            and ARTIFACT_PATTERN.fullmatch(a["name"]).group(1) == str(prior)
+        ]
+        if matches or attempt == 4:
+            break
+        print(f"Predecessor artifact not indexed yet ({attempt+1}/5); retrying.", flush=True)
+        time.sleep(10)
     if len(matches) != 1:
         fail(f"Run {prior} needs exactly one unexpired Wan artifact; got {len(matches)}")
     destination.mkdir(parents=True, exist_ok=True)
@@ -251,6 +262,9 @@ def previous_artifact(plan, destination):
         fail("Previous Wan artifact must contain exactly one last_frame.png")
     if sha_file(frames[0]) != state.get("last_frame_sha256"):
         fail("Previous chain frame failed SHA-256 verification")
+    videos = list(destination.rglob("video.mp4"))
+    if len(videos) != 1 or sha_file(videos[0]) != state.get("video_sha256"):
+        fail("Previous chain video failed SHA-256 verification")
     return state, frames[0]
 
 
