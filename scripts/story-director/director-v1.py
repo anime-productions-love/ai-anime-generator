@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Four-runner Anime Story Director: verified models and draft-only inference (v1).
+"""Four-runner Anime Story Director: verified models and draft-only inference (v2).
 
 No training, no production dispatch and no unapproved model-authored writes.
 The workflow calls prepare/download/infer in order; model weights are sourced
@@ -135,11 +135,23 @@ def download(args):
     free = fs.f_frsize * fs.f_bavail
     required = int(info["approx_bytes"]) + 2_500_000_000
     if free < required:
-        raise RuntimeError(
-            f"Controller SSD preflight failed: {free/1e9:.2f} GB free, "
-            f"needs at least {required/1e9:.2f} GB. Four-runner RPC "
-            "shares RAM, not download storage; no silent low-quality fallback."
-        )
+        # GGUF Q4 weights exceed the 14 GB advertised GitHub-runner SSD.
+        # Use the pinned HTTPS-range FUSE reader rather than downgrade the
+        # model to a substantially lower-quality quantization.
+        write_json(dest / "remote-manifest-v1.json", {
+            "version": "v1", "model": args.model,
+            "repository": info["repository"], "revision": commit,
+            "filename": filename, "expected_sha256": info["sha256"],
+            "approx_bytes": info["approx_bytes"],
+            "source_url": info["source"],
+            "remote_url": f"https://huggingface.co/{info['repository']}/resolve/{commit}/{filename}",
+        })
+        print(json.dumps({
+            "status": "REMOTE_HTTPS_RANGE_MOUNT_REQUIRED",
+            "free_bytes": free, "required_bytes": required,
+            "model": args.model, "revision": commit,
+        }), flush=True)
+        return
     outfile = dest / filename
     url = f"https://huggingface.co/{info['repository']}/resolve/{commit}/{filename}"
     subprocess.run([
