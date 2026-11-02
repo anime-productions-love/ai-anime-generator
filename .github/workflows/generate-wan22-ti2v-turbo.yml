@@ -1,5 +1,5 @@
-# Wan2.2 TI2V-5B Turbo, single/automatic chained scenes on CPU (v7).
-name: Generate Wan 2.2 Turbo anime scene (v7)
+# Wan2.2 TI2V-5B Turbo, single/automatic chained scenes on CPU (v8).
+name: Generate Wan 2.2 Turbo anime scene (v8)
 
 on:
   workflow_dispatch:
@@ -122,6 +122,15 @@ jobs:
             --chain-id "$CHAIN_ID" \
             --run-id "$GITHUB_RUN_ID" \
             --output work/wan-chain-plan.json
+
+      - name: Preserve chain recovery context before expensive inference
+        if: inputs.chain_plan != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: wan-chain-recovery-v1-${{ github.run_id }}
+          path: work/wan-chain-plan.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Resolve image, latest successful Wan frame, or video URL
         env:
@@ -259,7 +268,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: wan22-turbo-v7-${{ github.run_id }}
+          name: wan22-turbo-v8-${{ github.run_id }}
           path: outputs/wan22/
           if-no-files-found: error
           retention-days: 7
