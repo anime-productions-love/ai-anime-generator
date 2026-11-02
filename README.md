@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v10
+# AI Anime Story Generator — v11
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -13,11 +13,12 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Prepare or finalize distributed CPU character LoRA (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/train-character-lora.yml) | Prepare a request for the separate multi-runner CPU training network; verify and register the returned private LoRA only after training finishes |
 | [Publish anime comic pages and storyboard (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/publish-storyboard.yml) | Generate permanent comic-page PNGs, a CBZ comic and storyboard ZIP from approved images |
 | [Export or send selected anime shot to video generator (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/send-shot-to-video.yml) | Export a commit-pinned selected shot or dispatch a video generator in this same repository |
+| [Start continuous Wan anime scene (2–17 videos) (v1)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/start-continuous-wan-scene.yml) | Fill a GitHub form with 2–17 motion prompts and one shared video configuration; automatically generate and assemble the complete scene |
 | [Generate Wan 2.2 Turbo anime scene (v6)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-wan22-ti2v-turbo.yml) | Generate a prompt-directed video from a character image, private-gallery URL, or previous Wan clip |
 | [Smooth or speed up anime video (RIFE AI) (v3)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
 | [Assemble anime movie from scenes (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
 
-**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)** · **[Automatic Wan chains](docs/WAN-AUTOMATIC-CHAINS-v2.md)**.
+**Full instructions:** [Phase 1](docs/PHASE1-SETUP-v1.md) · [Phase 2](docs/PHASE2-SETUP-v1.md) · **[Phase 3](docs/PHASE3-SETUP-v3.md)** · **[Phase 4](docs/PHASE4-SETUP-v1.md)** · **[Video interpolation](docs/VIDEO-INTERPOLATION-SETUP-v1.md)** · **[Automatic Wan chains](docs/WAN-AUTOMATIC-CHAINS-v3.md)**.
 
 ## Private gallery image input (repaired)
 
@@ -33,17 +34,17 @@ The gallery's one-image commit page (`/commit/8e3d426698edfb8d4a3535767dddf437d1
 
 The earlier failed Wan run 41477592109 did **not** receive any of the secret names then wired into its workflow; code has since been repaired to pass `VIDEO_REPO_TOKEN`. No gallery credentials are sent to external media hosts.
 
-## Unattended multi-clip Wan scene chains
+## Unattended continuous Wan scenes — no file editing
 
-Create or edit a single [JSON scene plan](chains/example-anime-sequence-v1.json) in the repo's `chains/` folder. It defines the initial gallery image, a prompt for every clip, frame counts, FPS, dimensions, seeds, optional repeat counts, and final movie output settings.
+Open **[Start continuous Wan anime scene (2–17 videos)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/start-continuous-wan-scene.yml)** and click **Run workflow**. Choose your video count from 2 to 17, paste the **one starting image** (including private-gallery URLs), and enter the **one shared configuration**: frames, FPS, resolution, seed, framing and negative prompt.
 
-Then open [Generate Wan 2.2 Turbo anime scene (v6)](.github/workflows/generate-wan22-ti2v-turbo.yml), set `chain_plan=chains/example-anime-sequence-v1.json`, leave `chain_step=1`, `chain_previous_run` and `chain_id` blank, and click **Run workflow just once**. Other single-video settings are ignored for this mode.
+The GitHub form provides **17 separate video prompt boxes**. Fill only boxes 1 through your chosen count, leaving the rest blank. GitHub permits at most **25 workflow_dispatch input fields** and cannot hide unused boxes dynamically; using a combined `WxH` frame-size field makes 17 prompt boxes possible.
 
-Each generated clip is an **independent GitHub Actions run** (350-minute per-run job timeout) that takes the exact last frame from its predecessor artifact, preserves a SHA-verified chain state, and automatically dispatches the next clip. The final clip automatically requests the existing movie assembler to stitch all clips in order. A failed clip stops the chain without skipping; earlier finished artifacts stay available until their 7-day retention expires.
+A short start workflow automatically creates and commits the sequence plan from these inputs, then launches the existing Wan CPU generator. **The only image URL is used for video 1; each later video takes exclusively the immediately prior clip's validated last frame.** All generation settings remain identical across clips, and only the motion/action prompts differ. Every successful run dispatches the next; the last run requests movie assembly. Each clip has its own 350-minute job limit and a separate seven-day artifact.
 
-No Cloudflare Worker or GPU required. You can use private gallery files through the configured `VIDEO_REPO_TOKEN`. For longer completed movies, the [interpolation workflow](.github/workflows/enhance-anime-video.yml) now recognizes assembled movie run IDs. See the **[complete automatic chain guide v1](docs/WAN-AUTOMATIC-CHAINS-v2.md)** for planning, recovery and runtime limitations.
+The workflow does **not** require a Cloudflare Worker, GPU or manually edited JSON file. The configured `VIDEO_REPO_TOKEN` works for first-image access to the private gallery. The internal Wan workflow retains its original single-video mode and automatic continuation interface.
 
-**Status:** Source installed and committed, but no actual chain or automated handoff has been executed or verified yet.
+**[Full setup, continuation and recovery guide v3](docs/WAN-AUTOMATIC-CHAINS-v3.md)**. The source is committed; no live end-to-end sequence has been executed as part of this redesign.
 
 ## Quick start: make a short illustrated anime sequence
 
@@ -116,9 +117,10 @@ schemas/                                  Versioned character/scene/shot JSON co
 docs/PHASE3-SETUP-v3.md                   Phase 3 guide with distributed CPU training integration
 docs/PHASE4-SETUP-v1.md                   Phase 4 comic/storyboard/video guide
 docs/VIDEO-INTERPOLATION-SETUP-v1.md       CPU frame interpolation, smoothing and adjustable speed
-scripts/wan_chain.py                         WAN clip chaining, verified exact last-frame handoff (v2)
-chains/example-anime-sequence-v1.json       Editable full-scene production plan (v1)
-docs/WAN-AUTOMATIC-CHAINS-v2.md            Automatic multi-day production and recovery instructions (v1)
+scripts/wan_chain.py                         Wan chaining, strict previous-frame-only continuation (v4)
+scripts/wan_sequence_form.py                Native 25-field launch form, 17 video prompts (v1)
+.github/workflows/start-continuous-wan-scene.yml  Unattended continuous sequence launcher (v1)
+docs/WAN-AUTOMATIC-CHAINS-v3.md            Native workflow form and continuous production instructions (v3)
 ```
 
 ## Verification and scope
