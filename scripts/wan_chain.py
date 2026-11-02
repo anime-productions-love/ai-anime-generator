@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chain multiple Wan video scenes across separate GitHub Actions runs (v5).
+"""Chain multiple Wan video scenes across separate GitHub Actions runs (v6).
 
 Each run is a single <=350-minute Wan job; ONLY the initial clip uses
 an external image, and each later clip uses the prior clip's last_frame.png. A form-generated JSON plan supplies prompts and one shared configuration.
@@ -389,6 +389,7 @@ def advance(args):
             "postprocess_method": plan["postprocess"]["method"],
             "postprocess_fps": str(plan["postprocess"]["target_fps"]),
             "postprocess_speed": str(plan["postprocess"]["speed"]),
+            "postprocess_enabled": "true",
         }, repo, ref)
         print(f"All {plan['total']} clips generated. Final movie assembly dispatched.", flush=True)
     else:
