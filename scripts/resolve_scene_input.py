@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve a generation source from an image, previous scene, or video URL (v2).
+"""Resolve a generation source from an image, previous scene, or video URL (v3).
 
 Use the most recent *successful same-workflow* run with an unexpired artifact
 for automatic continuation; never select the current run or another model.
@@ -38,57 +38,83 @@ def gh_json(api_path):
     return json.loads(output)
 
 
+LEGACY_VIDEO_REPO = "anime-productions-love/ai-video-generator"
+
+
 def latest_frame(repository, workflow_file, current_run, destination):
+    """Prefer the unified repository, with a legacy fallback for old clips.
+
+    Original ai-video-generator runs are retained for historical continuity,
+    particularly Wan run 41448667591. No cross-repository write is attempted.
+    """
     prefix = WORKFLOWS[workflow_file]
-    for page in range(1, 6):
-        query = (
-            f"repos/{repository}/actions/workflows/{workflow_file}/runs"
-            f"?status=success&per_page=100&page={page}"
-        )
-        runs = gh_json(query).get("workflow_runs", [])
-        if not runs:
-            break
-        for item in runs:
-            run_id = int(item["id"])
-            if run_id >= current_run or item.get("conclusion") != "success":
-                continue
-            # A successful workflow does not necessarily have a usable artifact.
-            artifacts = gh_json(
-                f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100"
-            ).get("artifacts", [])
-            matching = [
-                a for a in artifacts
-                if not a.get("expired", False)
-                and re.fullmatch(
-                    rf"{re.escape(prefix)}-v[0-9]+-{run_id}", a.get("name", "")
-                )
-            ]
-            if len(matching) != 1:
-                continue
-            with tempfile.TemporaryDirectory(prefix="previous_scene_") as directory:
-                command([
-                    "gh", "run", "download", str(run_id),
-                    "--repo", repository,
-                    "--name", matching[0]["name"],
-                    "--dir", directory,
-                ])
-                frames = list(Path(directory).rglob("last_frame.png"))
-                if len(frames) != 1 or frames[0].stat().st_size == 0:
-                    raise RuntimeError(
-                        f"Successful run {run_id} has an artifact but not exactly one "
-                        "valid last_frame.png. Repair that artifact or use an image URL."
-                    )
-                shutil.copyfile(frames[0], destination)
-            print(
-                f"Continuing from {workflow_file} run {run_id} "
-                f"(artifact {matching[0]['name']}).",
-                flush=True,
+    repositories = [repository]
+    if repository != LEGACY_VIDEO_REPO:
+        repositories.append(LEGACY_VIDEO_REPO)
+    for source_repo in repositories:
+        for page in range(1, 6):
+            query = (
+                f"repos/{source_repo}/actions/workflows/{workflow_file}/runs"
+                f"?status=success&per_page=100&page={page}"
             )
-            return
+            try:
+                runs = gh_json(query).get("workflow_runs", [])
+            except subprocess.CalledProcessError:
+                if source_repo == repository:
+                    raise RuntimeError(
+                        "Unable to list successful runs in the unified repository. "
+                        "Check Actions:read permissions."
+                    )
+                print(
+                    f"Legacy repo {source_repo} is not readable with the current "
+                    "Actions token; legacy continuation unavailable.", flush=True,
+                )
+                break
+            if not runs:
+                break
+            for item in runs:
+                run_id = int(item["id"])
+                if (source_repo == repository and run_id >= current_run) or item.get("conclusion") != "success":
+                    continue
+                try:
+                    artifacts = gh_json(
+                        f"repos/{source_repo}/actions/runs/{run_id}/artifacts?per_page=100"
+                    ).get("artifacts", [])
+                except subprocess.CalledProcessError:
+                    continue
+                matches = [
+                    item for item in artifacts
+                    if not item.get("expired", False)
+                    and re.fullmatch(
+                        rf"{re.escape(prefix)}-v[0-9]+-{run_id}",
+                        item.get("name", ""),
+                    )
+                ]
+                if len(matches) != 1:
+                    continue
+                with tempfile.TemporaryDirectory(prefix="previous_scene_") as directory:
+                    command([
+                        "gh", "run", "download", str(run_id),
+                        "--repo", source_repo,
+                        "--name", matches[0]["name"],
+                        "--dir", directory,
+                    ])
+                    frames = list(Path(directory).rglob("last_frame.png"))
+                    if len(frames) != 1 or frames[0].stat().st_size == 0:
+                        raise RuntimeError(
+                            f"Successful run {source_repo}/{run_id} has an artifact "
+                            "without exactly one final frame."
+                        )
+                    shutil.copyfile(frames[0], destination)
+                print(
+                    f"Continuing from {source_repo} {workflow_file} "
+                    f"run {run_id} ({matches[0]['name']}).", flush=True,
+                )
+                return
     raise RuntimeError(
-        f"No earlier successful {workflow_file} run has an unexpired "
-        "video artifact with a final frame. Start with Image URL first. "
-        "Generator artifacts currently expire after seven days."
+        f"No successful {workflow_file} run with an unexpired last_frame.png "
+        "is accessible in the unified or legacy repository. Use an image or "
+        "video URL to begin; generation artifacts currently expire in 7 days."
     )
 
 
