@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export or dispatch one canonical storyboard image to existing video workflows (v3).
+"""Export or dispatch one canonical storyboard image to the Wan video workflow (v4).
 
 Dispatch is opt-in and uses the built-in GITHUB_TOKEN with Actions:write
 on this same unified anime repository. Acceptance does NOT mean video generated.
@@ -22,7 +22,6 @@ TARGET = "anime-productions-love/ai-anime-generator"
 SOURCE = "anime-productions-love/ai-anime-generator"
 ENGINES = {
     "wan": "generate-wan22-ti2v-turbo.yml",
-    "svd": "generate-svd-xt.yml",
 }
 
 
@@ -127,22 +126,13 @@ def main():
     )
     if len(motion) > 5000:
         parser.error("motion prompt exceeds 5000 characters")
-    if args.engine == "wan":
-        inputs = {
-            "source_mode": "image", "image": image_url,
-            "prompt": motion, "negative_prompt": shot.get("composed_negative_prompt", "")[:3000],
-            "fit_mode": "contain-blur", "frames": str(args.frames),
-            "fps": str(args.fps), "width": str(args.width),
-            "height": str(args.height), "seed": str(shot["seed"]),
-        }
-    else:
-        inputs = {
-            "source_mode": "image", "image": image_url,
-            "fit_mode": "contain-blur", "frames": str(args.frames),
-            "steps": "25", "precision": "bf16",
-            "seed": str(shot["seed"]), "fps": str(args.fps),
-            "motion_bucket_id": "180", "noise_aug_strength": "0.02",
-        }
+    inputs = {
+        "source_mode": "image", "image": image_url,
+        "prompt": motion, "negative_prompt": shot.get("composed_negative_prompt", "")[:3000],
+        "fit_mode": "contain-blur", "frames": str(args.frames),
+        "fps": str(args.fps), "width": str(args.width),
+        "height": str(args.height), "seed": str(shot["seed"]),
+    }
     receipt_path = (
         sequence_dir(args.story_id, args.sequence_id) / "video-handoffs"
         / ("handoff-" + args.handoff_id + ".json")
