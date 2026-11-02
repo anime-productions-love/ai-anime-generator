@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Anime shot/sequence manifests: prepare, publish, and select (v2).
+"""Anime shot/sequence manifests: prepare, publish, and select (v3).
 
 Uses Phase 1 character/scene manifests as canonical identity records.
 No model downloads and no network I/O; all work uses local Git-backed files.
@@ -184,9 +184,20 @@ def prepare(args):
     for char in characters:
         ref = (char.get("adapters") or {}).get("character_lora")
         if ref:
-            if not re.fullmatch(r"hf://[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", ref):
-                raise ValueError(f"Invalid registered LoRA for {char['id']}: expected hf://namespace/repository")
-            registered_loras.append({"character_id": char["id"], "repository": ref[5:]})
+            matched = re.fullmatch(
+                r"hf://([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@([a-f0-9]{40}))?",
+                ref,
+            )
+            if not matched:
+                raise ValueError(
+                    f"Invalid registered LoRA for {char['id']}: "
+                    "expected hf://namespace/repository@<40-char-commit>"
+                )
+            registered_loras.append({
+                "character_id": char["id"],
+                "repository": matched.group(1),
+                "revision": matched.group(2),
+            })
 
     negative_parts = [style.get("negative_prompt", "")]
     positive_parts = [style.get("prompt_prefix", ""), "masterpiece, best quality, cinematic anime storyboard"]
