@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smooth existing Wan/SVD videos via RIFE CPU AI or FFmpeg optical flow (v2).
+"""Smooth existing Wan/SVD videos via RIFE CPU AI or FFmpeg optical flow (v3).
 
 Independent post-production: does not rerun AI diffusion. Source can be a
 successful run in the unified/legacy repository or a private-gallery URL.
@@ -90,9 +90,13 @@ def get_run_video(run_id, source_repo, directory):
             "gh", "run", "download", run_id,
             "--repo", repo, "--name", matches[0]["name"], "--dir", unpack,
         ])
-        videos = list(unpack.rglob("video.mp4"))
+        expected_video = ("movie.mp4" if matches[0]["name"].startswith("anime-movie-")
+                          else "video.mp4")
+        videos = list(unpack.rglob(expected_video))
         if len(videos) != 1:
-            raise ValueError(f"Expected one video.mp4 in {repo}/{run_id}; found {len(videos)}")
+            raise ValueError(
+                f"Expected exactly one {expected_video} in {repo}/{run_id}; found {len(videos)}"
+            )
         target = directory / "source.mp4"
         shutil.copyfile(videos[0], target)
         return target, {
