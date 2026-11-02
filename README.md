@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v12
+# AI Anime Story Generator — v13
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -14,6 +14,7 @@ A Git-backed production system for **anime characters, reusable environments, se
 | [Publish anime comic pages and storyboard (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/publish-storyboard.yml) | Generate permanent comic-page PNGs, a CBZ comic and storyboard ZIP from approved images |
 | [Export or send selected anime shot to video generator (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/send-shot-to-video.yml) | Export a commit-pinned selected shot or dispatch a video generator in this same repository |
 | [Start continuous Wan anime scene (2–15 videos) (v2)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/start-continuous-wan-scene.yml) | Fill a GitHub form with 2–15 motion prompts, and shared finishing settings and one shared video configuration; automatically generate and assemble the complete scene |
+| [Anime Story Director four-runner AI (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/anime-story-director-quad-v1.yml) | Select Muse Glimmer 30B, Qwen3.8-27B or Qwen3.6-35B-A3B; coordinate four private CPU runners for story draft generation, no automatic render |
 | [Generate Wan 2.2 Turbo anime scene (v9)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/generate-wan22-ti2v-turbo.yml) | Generate a prompt-directed video from a character image, private-gallery URL, or previous Wan clip |
 | [Smooth or speed up anime video (RIFE AI) (v4)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/enhance-anime-video.yml) | Interpolate an existing video to smoother 12–60 FPS with independent 0.75–4× speed control, without rerunning Wan/SVD |
 | [Assemble anime movie from scenes (v6)](https://github.com/anime-productions-love/ai-anime-generator/actions/workflows/assemble-anime-movie.yml) | Combine original or RIFE-interpolated clips into a final MP4 |
@@ -45,6 +46,16 @@ A short start workflow automatically creates and commits the sequence plan from 
 The workflow does **not** require a Cloudflare Worker, GPU or manually edited JSON file. The configured `VIDEO_REPO_TOKEN` works for first-image access to the private gallery. The internal Wan workflow retains its original single-video mode and automatic continuation interface.
 
 **[Full setup, continuation and recovery guide v3](docs/WAN-AUTOMATIC-CHAINS-v3.md)**. The source is committed; no live end-to-end sequence has been executed as part of this redesign.
+
+## Four-runner AI Story Director (three selectable open-weight models)
+
+A new [quad CPU Story Director workflow](.github/workflows/anime-story-director-quad-v1.yml) selects among **Muse Glimmer 30B, Qwen3.8-27B and Qwen3.6-35B-A3B** for draft creative/production plans. Four standard public GitHub Actions runners start together; one coordinator serves a pinned `llama.cpp` build while three private Tailscale-connected CPU RPC nodes contribute model computation. It reuses the ephemeral GitHub OIDC/Tailscale and exact-rank rendezvous pattern from Contract-Automation, **not** the training pipeline.
+
+Model GGUFs are source-referenced, quantized, and SHA-256-identified in [models-v1.json](scripts/story-director/models-v1.json). They are fetched only when selected; 16–20 GB model binaries are **not committed** to Git. If local runner disk space is insufficient, the workflow attempts a pinned read-only remote GGUF mount via FUSE/HTTPS ranges rather than silently degrading quality.
+
+To enable the workflow, the anime-generator repository needs its own `TS_OAUTH_CLIENT_ID` Actions secret and a corresponding `tag:ai-training` OIDC trust policy in Tailscale; Contract-Automation's Actions secret is **not automatically shared**. The live multi-runner inference, disk fallback and CPU performance are **unverified**, and **no tests or inference jobs were executed** when installing this source.
+
+[Complete Story Director v1 setup guide](docs/STORY-DIRECTOR-QUAD-v1.md). This initial workflow outputs an **unapproved story/shot plan** for human review, not an automatic video production request. The optional vision projectors and Cloudflare approval integration are not yet activated.
 
 ## Production enhancements — archiving, recovery, caching and Cloudflare
 
