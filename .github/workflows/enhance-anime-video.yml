@@ -1,0 +1,141 @@
+# Post-process existing anime video; does not rerun Wan or SVD (v1).
+name: Smooth or speed up anime video (RIFE AI) (v1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: "Completed Wan/SVD run ID (unified or old video repo); leave blank if using URL"
+        type: string
+        required: false
+      video_url:
+        description: "OR direct video URL, including private anime-productions-love/gallery files"
+        type: string
+        required: false
+      source_repo:
+        description: "Where to find run artifact (auto also checks legacy repo)"
+        type: choice
+        required: true
+        default: auto
+        options:
+          - auto
+          - unified
+          - legacy
+      method:
+        description: "CPU neural interpolation or FFmpeg optical-flow interpolation"
+        type: choice
+        required: true
+        default: rife
+        options:
+          - rife
+          - motion
+      target_fps:
+        description: "Output FPS; interpolation inserts frames while preserving duration"
+        type: choice
+        required: true
+        default: "24"
+        options:
+          - "12"
+          - "24"
+          - "30"
+          - "48"
+          - "60"
+      playback_speed:
+        description: "1 = same duration; 2 = twice as fast, half duration"
+        type: choice
+        required: true
+        default: "1.0"
+        options:
+          - "0.75"
+          - "1.0"
+          - "1.25"
+          - "1.5"
+          - "2.0"
+          - "3.0"
+          - "4.0"
+      quality_crf:
+        description: "MP4 H.264 quality; lower values preserve more detail"
+        type: number
+        required: true
+        default: 20
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  enhance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      PYTHONUNBUFFERED: "1"
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_FINE_GRAINED_TOKEN: ${{ secrets.GITHUB_FINE_GRAINED_TOKEN }}
+      GALLERY_REPO_TOKEN: ${{ secrets.GALLERY_REPO_TOKEN }}
+      GALLERY_TOKEN: ${{ secrets.GALLERY_TOKEN }}
+      SOURCE_RUN: ${{ inputs.source_run }}
+      VIDEO_URL: ${{ inputs.video_url }}
+      SOURCE_REPO: ${{ inputs.source_repo }}
+      INTERPOLATION_METHOD: ${{ inputs.method }}
+      TARGET_FPS: ${{ inputs.target_fps }}
+      PLAYBACK_SPEED: ${{ inputs.playback_speed }}
+      CRF: ${{ inputs.quality_crf }}
+    steps:
+      - name: Checkout unified anime video tools
+        uses: actions/checkout@v4
+
+      - name: Install CPU video codecs and archive tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg unzip libvulkan1
+
+      - name: Install official RIFE-ncnn CPU engine and anime interpolation model
+        if: inputs.method == 'rife'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p thirdparty/rife
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 \
+            -o "${RUNNER_TEMP}/rife-20221029-ubuntu.zip" \
+            "https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-ubuntu.zip"
+          unzip -q "${RUNNER_TEMP}/rife-20221029-ubuntu.zip" -d thirdparty/rife
+          binary="$(find thirdparty/rife -type f -name rife-ncnn-vulkan -print -quit)"
+          if [[ -z "$binary" ]]; then
+            echo "::error::Official RIFE release did not contain rife-ncnn-vulkan binary"
+            exit 1
+          fi
+          model="$(find thirdparty/rife -type d -name rife-v4.6 -print -quit)"
+          if [[ -z "$model" ]]; then
+            model="$(find thirdparty/rife -type d -name rife-v4 -print -quit)"
+          fi
+          if [[ -z "$model" ]]; then
+            echo "::error::Official RIFE release contained no compatible rife-v4.x model"
+            exit 1
+          fi
+          chmod +x "$binary"
+          echo "RIFE_BINARY=$(realpath "$binary")" >> "$GITHUB_ENV"
+          echo "RIFE_MODEL=$(realpath "$model")" >> "$GITHUB_ENV"
+          echo "Installed pinned upstream RIFE release 20221029 (CPU backend, -g -1)."
+
+      - name: Generate smooth video with duration/speed controlled separately
+        run: |
+          python3 -u scripts/interpolate_video.py \
+            --source-run "$SOURCE_RUN" \
+            --video-url "$VIDEO_URL" \
+            --source-repo "$SOURCE_REPO" \
+            --method "$INTERPOLATION_METHOD" \
+            --target-fps "$TARGET_FPS" \
+            --speed "$PLAYBACK_SPEED" \
+            --crf "$CRF" \
+            --output-dir outputs/enhanced
+
+      - name: Upload enhanced MP4, final frame and timing metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-smooth-video-v1-${{ github.run_id }}
+          path: |
+            outputs/enhanced/video.mp4
+            outputs/enhanced/last_frame.png
+            outputs/enhanced/metadata.json
+          if-no-files-found: error
+          retention-days: 7
