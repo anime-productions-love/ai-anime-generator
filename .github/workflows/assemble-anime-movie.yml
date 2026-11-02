@@ -1,5 +1,5 @@
-# Compose already-generated Wan/SVD or interpolated clip artifacts (v4).
-name: Assemble anime movie from scenes (v4)
+# Compose already-generated Wan/SVD or interpolated clip artifacts (v5).
+name: Assemble anime movie from scenes (v5)
 
 on:
   workflow_dispatch:
@@ -128,9 +128,17 @@ jobs:
       - name: Upload finished anime movie and scene timeline
         uses: actions/upload-artifact@v4
         with:
-          name: anime-movie-v4-${{ github.run_id }}
+          name: anime-movie-v5-${{ github.run_id }}
           path: |
             outputs/movie/movie.mp4
             outputs/movie/timeline.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Archive all movie outputs permanently to private gallery
+        if: success()
+        env:
+          VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+        run: |
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind movie --source outputs/movie
