@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle T4 motion-guided renderer (v10).
+"""Kaggle T4 motion-guided renderer (v11).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 import traceback
 
@@ -161,8 +162,36 @@ def main():
     mask = [Image.new("L", (width, height), 0) for _ in range(frames)]
     control[0].save(OUT / "source-image.png")
     control[1].save(OUT / "control-edge-preview.png")
+    # Read actual per-device activity, not just torch.cuda.device_count().
+    # Sampling is observational and never initiates GPU work of its own.
+    gpu_samples = []
+    gpu_stop = threading.Event()
+    def observe_gpus():
+        while not gpu_stop.is_set():
+            try:
+                result = subprocess.run([
+                    "nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used",
+                    "--format=csv,noheader,nounits"
+                ], capture_output=True, text=True, check=True, timeout=5)
+                entries = []
+                for line in result.stdout.splitlines():
+                    parts = [part.strip() for part in line.split(",")]
+                    if len(parts) == 3:
+                        entries.append({"gpu": int(parts[0]), "utilization_percent": int(parts[1]),
+                                        "memory_mib": int(parts[2])})
+                if entries:
+                    gpu_samples.append({"elapsed_seconds": round(time.time() - started, 1),
+                                        "devices": entries})
+            except Exception as exc:
+                print("GPU telemetry unavailable: " + str(exc)[:200], flush=True)
+                break
+            if gpu_stop.wait(5):
+                break
+
     pipe = None
     started = time.time()
+    gpu_thread = threading.Thread(target=observe_gpus, name="gpu-activity", daemon=True)
+    gpu_thread.start()
     try:
         # The pinned VACE pipeline runs VAE.encode() on tensors located on
         # its execution device. "balanced" placement with an external VAE
@@ -288,6 +317,8 @@ def main():
             "version": "v1", "status": "RENDERED_UNREVIEWED",
             "model": MODEL, "motion_control": "experimental_edge_guidance",
             "gpus": cards, "memory_strategy": memory_strategy,
+            "gpu_execution": "single_gpu_cuda0",
+            "gpu_activity_report": "gpu-activity-v1.json",
             "source_kind": "google_drive_public_link",
             "image_drive_file_id": job["image_drive_file_id"],
             "motion_drive_file_id": job["motion_drive_file_id"],
@@ -307,6 +338,30 @@ def main():
         )
         print("KAGGLE_RENDER_COMPLETED_UNREVIEWED")
     finally:
+        gpu_stop.set()
+        gpu_thread.join(timeout=7)
+        summaries = []
+        for index, name in enumerate(cards):
+            records = [entry for row in gpu_samples for entry in row["devices"]
+                       if entry["gpu"] == index]
+            summaries.append({
+                "gpu": index, "name": name, "observations": len(records),
+                "max_utilization_percent": max(
+                    (r["utilization_percent"] for r in records), default=None),
+                "peak_memory_mib": max(
+                    (r["memory_mib"] for r in records), default=None),
+                "active_samples_ge_10pct": sum(
+                    r["utilization_percent"] >= 10 for r in records)
+            })
+        report = {
+            "version": "v1", "renderer_version": "v11",
+            "execution_strategy": "sequential_cpu_offload_cuda0_only",
+            "both_gpus_assigned_to_inference": False,
+            "samples": gpu_samples, "summary": summaries
+        }
+        (OUT / "gpu-activity-v1.json").write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print("Actual GPU usage summary: " + json.dumps(summaries), flush=True)
         del pipe
         torch.cuda.empty_cache()
 
