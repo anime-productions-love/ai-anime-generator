@@ -1,5 +1,5 @@
-# Kaggle dual-T4 motion renderer bridge, v5. Restore Kaggle CLI six dependency.
-name: Kaggle GPU Motion Renderer (v5)
+# Kaggle dual-T4 motion renderer bridge, v6. Normalize supported Wan frame counts.
+name: Kaggle GPU Motion Renderer (v6)
 on:
   workflow_dispatch:
     inputs:
@@ -30,7 +30,7 @@ on:
         type: string
         default: ""
       frames:
-        description: Frames (4n+1, from 5 to 81)
+        description: Requested frames (5–81; automatically rounded to nearest supported 4n+1)
         type: number
         default: 17
       fps:
