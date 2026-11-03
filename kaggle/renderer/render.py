@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v2).
+"""Kaggle dual-T4 experimental motion-guided renderer (v3).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Input files live in a Kaggle dataset, not inside a public GitHub workflow input.
@@ -70,14 +70,13 @@ def frames_from_reference(video, count, width, height):
 def main():
     # Notebook code itself carries the approved JSON so Kaggle CLI upload
     # need not preserve arbitrary sidecar files when pushing a kernel.
-    try:
-        import diffusers
-    except ImportError:
-        subprocess.run([
-            sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-            "-q", "diffusers==0.35.2", "transformers==4.57.1",
-            "accelerate==1.11.0", "ftfy", "sentencepiece"
-        ], check=True)
+    # Install documented Wan VACE dependencies before importing the pipeline.
+    # Kaggle base images change, so do not trust preinstalled versions.
+    subprocess.run([
+        sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+        "-q", "diffusers==0.35.2", "transformers==4.57.1",
+        "accelerate==1.11.0", "ftfy", "sentencepiece"
+    ], check=True)
     import torch
     import cv2
     from PIL import Image, ImageOps
@@ -146,8 +145,8 @@ def main():
             raise RuntimeError("Model returned no usable video")
         subprocess.run([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-sseof", "-0.1", "-i", str(target), "-frames:v", "1",
-            str(OUT / "last_frame.png")
+            "-i", str(target), "-vf", f"select=eq(n\\,{frames - 1})",
+            "-vsync", "0", "-frames:v", "1", str(OUT / "last_frame.png")
         ], check=True)
         if not (OUT / "last_frame.png").is_file():
             raise RuntimeError("Missing last frame")
