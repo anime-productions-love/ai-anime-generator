@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v6).
+"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v7).
 
 Loads an existing, pinned SCAIL-2 API-format ComfyUI graph. No custom diffusion,
 motion mask or pose inference is implemented here. Large weights preferentially
@@ -276,9 +276,11 @@ def animate(job):
     })
     # Ensure the ComfyUI runtime and model download libraries are available.
     install_components()
+    # Validate that both real media inputs are downloadable BEFORE fetching
+    # ~24 GB of model checkpoints, avoiding expensive wasted Kaggle time.
+    image, motion, raw_image, raw_video = get_inputs(job, TMP)
     inventory = ensure_models()
     configure_api_workflow()
-    image, motion, raw_image, raw_video = get_inputs(job, TMP)
     # Make every completed ComfyUI segment durable even if later inference
     # or postprocessing crashes. Kaggle only preserves /kaggle/working.
     persistent_outputs = OUT / "comfy-output"
