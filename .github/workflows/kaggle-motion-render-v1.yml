@@ -1,5 +1,5 @@
-# Kaggle dual-T4 motion renderer bridge, v6. Normalize supported Wan frame counts.
-name: Kaggle GPU Motion Renderer (v6)
+# Kaggle dual-T4 motion renderer bridge, v7. Accept animated WebP/GIF/MP4 references.
+name: Kaggle GPU Motion Renderer (v7)
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +18,7 @@ on:
         type: string
         default: ""
       motion_drive_url:
-        description: Google Drive motion MP4 share URL (Anyone with link - Viewer)
+        description: Google Drive motion MP4, animated WebP, or GIF link (Anyone with link - Viewer)
         type: string
         default: ""
       prompt:
