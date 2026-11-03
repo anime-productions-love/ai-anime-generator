@@ -1,10 +1,11 @@
-# Kaggle motion renderer bridge, v15. Salvage incomplete outputs without GPU rerun. Trigger marker: 20261103-1.
-name: Kaggle GPU Motion Renderer (v15)
+# Kaggle motion renderer bridge, v16. Add selectable SCAIL-2 Q6_K notebook backend.
+name: Kaggle GPU Motion Renderer (v16)
 on:
   push:
     branches: [main]
     paths:
       - 'kaggle/renderer/render.py'
+      - 'kaggle/renderer/scail2.py'
       - 'scripts/kaggle_motion_bridge.py'
       - '.github/workflows/kaggle-motion-render-v1.yml'
   workflow_dispatch:
@@ -15,6 +16,19 @@ on:
         options: [submit, retrieve]
         default: submit
         required: true
+      engine:
+        description: Existing VACE or SCAIL-2 Q6_K ComfyUI backend
+        type: choice
+        options: [vace-1.3b, scail2-q6k]
+        default: vace-1.3b
+      kaggle_datasets:
+        description: Optional semicolon-separated owner/slug identifiers for reusable model datasets
+        type: string
+        default: ""
+      duration_seconds:
+        description: SCAIL-2 first clip duration in seconds (1 to 5)
+        type: number
+        default: 2
       kaggle_username:
         description: Kaggle username for private render jobs (override if different)
         type: string
@@ -58,7 +72,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   kaggle-bridge:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-monitor]') || contains(github.event.head_commit.message, '[kaggle-salvage]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-scail]') || contains(github.event.head_commit.message, '[kaggle-monitor]') || contains(github.event.head_commit.message, '[kaggle-salvage]')
     name: Kaggle ${{ inputs.operation || 'submit' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -66,6 +80,9 @@ jobs:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
       KG_USER: ${{ inputs.kaggle_username || 'jamesnexus' }}
+      KG_ENGINE: ${{ contains(github.event.head_commit.message, '[kaggle-scail]') && 'scail2-q6k' || inputs.engine || 'vace-1.3b' }}
+      KG_DATASETS: ${{ inputs.kaggle_datasets || '' }}
+      KG_DURATION: ${{ inputs.duration_seconds || 2 }}
       KG_IMAGE_DRIVE: ${{ inputs.image_drive_url || 'https://drive.google.com/file/d/1koBX9M-8FpO10dX2H1OPdL0TY8myu-Sw/view' }}
       KG_MOTION_DRIVE: ${{ inputs.motion_drive_url || 'https://drive.google.com/file/d/1o4z06n0zJ2Mclj_imu1WzLoeW0XE9kvU/view' }}
       KG_PROMPT: ${{ inputs.prompt || 'Animate all three characters following the motion reference as closely as possible. Preserve each character’s unique identity, facial features, hairstyle, clothing, colors, and original anime art style. Maintain their relative positions, proportions, and spatial relationships. Keep the original image framing and crop fixed. If any body parts are currently out of frame or cropped out, keep them out of frame and do not reveal or invent hidden body parts. Preserve the existing composition exactly while animating only the visible portions of the characters. Ensure natural, synchronized movement and consistent anatomy throughout the animation.' }}
@@ -90,19 +107,30 @@ jobs:
           test -n "$KAGGLE_API_TOKEN" || { echo "::error::KAGGLE_API_TOKEN Actions secret is missing"; exit 1; }
           python -m pip install -q --disable-pip-version-check 'kaggle>=2.2.4,<3' 'six>=1.16,<2'
       - name: Prepare approved GPU render
-        if: inputs.operation == 'submit' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[kaggle-retry]'))
+        if: inputs.operation == 'submit' || (github.event_name == 'push' && (contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-scail]')))
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$KG_ENGINE" = "scail2-q6k" ]; then
+            render_steps=6
+            render_fps=16
+            render_frames=$(( KG_DURATION * 16 + 1 ))
+          else
+            render_steps=20
+            render_fps="$KG_FPS"
+            render_frames="$KG_FRAMES"
+          fi
           python3 scripts/kaggle_motion_bridge.py prepare \
             --kaggle-username "$KG_USER" --run-id "$GITHUB_RUN_ID" \
+            --engine "$KG_ENGINE" --kaggle-datasets "$KG_DATASETS" \
+            --duration-seconds "$KG_DURATION" \
             --image-drive "$KG_IMAGE_DRIVE" --motion-drive "$KG_MOTION_DRIVE" \
             --prompt "$KG_PROMPT" --negative "$KG_NEGATIVE" \
-            --frames "$KG_FRAMES" --fps "$KG_FPS" \
+            --frames "$render_frames" --fps "$render_fps" --steps "$render_steps" \
             --path "$RUNNER_TEMP/kaggle-stage" \
             --receipt "$RUNNER_TEMP/kaggle-receipt-v1.json"
       - name: Submit private dual-T4 Kaggle job
-        if: inputs.operation == 'submit' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[kaggle-retry]'))
+        if: inputs.operation == 'submit' || (github.event_name == 'push' && (contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-scail]')))
         shell: bash
         run: |
           set -euo pipefail
@@ -117,7 +145,7 @@ jobs:
               f.write("Submission is not a completed render. Retrieve after Kaggle finishes using this run ID.\n")
           PY
       - name: Preserve submission identity
-        if: inputs.operation == 'submit' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[kaggle-retry]'))
+        if: inputs.operation == 'submit' || (github.event_name == 'push' && (contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-scail]')))
         uses: actions/upload-artifact@v4
         with:
           name: kaggle-motion-submission-v1-${{ github.run_id }}
