@@ -1,12 +1,12 @@
-# Kaggle GPU Motion Rendering Integration — v7
+# Kaggle GPU Motion Rendering Integration — v8
 
 ## Implementation status
 
 Uses the existing `anime-productions-love/ai-anime-generator` pipeline:
 
-- [Kaggle GPU Motion Renderer (v8)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
-- [Bridge v4](../scripts/kaggle_motion_bridge.py) — extracts and validates Google Drive file IDs before submitting an isolated private Kaggle notebook.
-- [GPU renderer v7](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4/animated WebP/GIF directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
+- [Kaggle GPU Motion Renderer (v11)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
+- [Bridge v6](../scripts/kaggle_motion_bridge.py) — extracts and validates Google Drive file IDs before submitting an isolated private Kaggle notebook.
+- [GPU renderer v8](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4/animated WebP/GIF directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
 - [Existing private gallery archiver v3](../scripts/archive_gallery.py) — permanently archives retrieved, checksum-verified results.
 
 **Kaggle dataset storage is NOT used.** No files are temporarily committed to public GitHub. There are no additional workflows, GitHub secrets or GPU systems.
@@ -45,6 +45,6 @@ The bridge verifies Kaggle reports completion; downloads the resulting media; re
 
 ## Limits and dependencies
 
-The experimental renderer uses Canny-edge control derived from one reference video, not true motion retargeting or a guarantee of matching three characters. With two CUDA T4s it now uses Diffusers balanced device placement with a reserved ~3 GiB of headroom per GPU. GPU memory is physically separate, not pooled. If only one T4 is allocated, it uses slower sequential CPU offload instead of whole-model CPU offload. A tiled VAE reduces peak encode/decode memory and can introduce tile-edge tone differences. Initial resolution remains 512x288 and 20 inference steps, while frame count follows the workflow input (17 frames by default). The change responds to a real 25-frame CUDA OOM at ~14.3 GiB allocated on GPU 0; it has not yet been validated by a successful Kaggle render.
+The experimental renderer uses Canny-edge control derived from one reference video, not true motion retargeting or a guarantee of matching three characters. The renderer now uses validated sequential CPU offload on cuda:0 rather than unsupported mixed VAE placement. A tiled VAE reduces peak encode/decode memory and may introduce tile-edge tone differences. The successful source-bound run used 25 frames and 8 FPS. This confirms output generation and checksum integrity, not animation quality or perfect motion retargeting.
 
-The existing GitHub Actions secrets `KAGGLE_API_TOKEN` (Kaggle CLI) and `VIDEO_REPO_TOKEN` (private gallery write access) remain required. Neither secret is transferred to Kaggle. The Drive URLs identify shared source files, not credentials. This revision has not triggered another Kaggle render or any tests. Verify the actual available CUDA devices and printed pipeline device placement in Kaggle logs to confirm the chosen memory strategy. The negative prompt form input is wired to the existing bridge `--negative` argument. Custom negatives add to the renderer's built-in safeguards.
+The existing GitHub Actions secrets `KAGGLE_API_TOKEN` (Kaggle CLI) and `VIDEO_REPO_TOKEN` (private gallery write access) remain required. Neither secret is transferred to Kaggle. The Drive URLs identify shared source files, not credentials. Verified success: Kaggle kernel `jamesnexus/anime-motion-render-41585877699` completed successfully (438.1-second GPU execution). The monitor GitHub run `41586403161` retrieved one result manifest, one video and final frame, checked their SHA-256 digests, and verified a permanent private gallery release containing 9 files (1,191,439 bytes). Archive: https://github.com/anime-productions-love/gallery/releases/tag/anime-archive-41586403161 . The user must review visual quality before chaining. File-triggered retry and monitor execution are supported by the existing workflow without new workflow files. The negative prompt form input is wired to the existing bridge `--negative` argument. Custom negatives add to the renderer's built-in safeguards.
