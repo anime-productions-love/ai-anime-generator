@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v14
+# AI Anime Story Generator — v15
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -46,6 +46,14 @@ A short start workflow automatically creates and commits the sequence plan from 
 The workflow does **not** require a Cloudflare Worker, GPU or manually edited JSON file. The configured `VIDEO_REPO_TOKEN` works for first-image access to the private gallery. The internal Wan workflow retains its original single-video mode and automatic continuation interface.
 
 **[Full setup, continuation and recovery guide v3](docs/WAN-AUTOMATIC-CHAINS-v3.md)**. The source is committed; no live end-to-end sequence has been executed as part of this redesign.
+
+## Kaggle T4 ×2 GPU motion renderer (experimental)
+
+The [Kaggle GPU Motion Renderer workflow v2](.github/workflows/kaggle-motion-render-v1.yml) connects GitHub Actions to Kaggle's private notebook API using the `KAGGLE_API_TOKEN` secret. It supports separately requested **submit** and **retrieve** operations for one reference-image + motion-video experiment. Submission generates a uniquely identified Kaggle notebook, requests the dual-T4 accelerator, and records the Kaggle kernel identity. The retrieval path checks Kaggle's actual completion status and SHA-256-verifies its output before the [existing private gallery archiver](scripts/archive_gallery.py) stores it. Generated video is **not** exposed as a public GitHub Actions artifact.
+
+The included [experimental Wan VACE 1.3B renderer v3](kaggle/renderer/render.py) uses an anime character image and reference video's edge-motion information; it is not yet confirmed to faithfully transfer full human pose and expression. It uses only one T4 with CPU offload, not two GPUs of combined VRAM. **Neither the API submission nor actual Kaggle GPU rendering has been executed or verified.** It never automatically chains unreviewed output into another scene.
+
+[Complete Kaggle connection, private dataset and retrieval instructions v1](docs/KAGGLE-GPU-MOTION-v1.md).
 
 ## Four-runner AI Story Director (three selectable open-weight models)
 
