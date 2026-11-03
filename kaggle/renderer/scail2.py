@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v3).
+"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v4).
 
 Loads an existing, pinned SCAIL-2 API-format ComfyUI graph. No custom diffusion,
 motion mask or pose inference is implemented here. Large weights preferentially
@@ -350,11 +350,40 @@ def animate(job):
             server.kill()
         logfile.close()
 
+def early_storage_preflight():
+    # This runs with Kaggle's stock Python before any package installation.
+    # Abort impossible allocations before consuming inference/download time.
+    TMP.mkdir(parents=True, exist_ok=True)
+    found = set()
+    if Path("/kaggle/input").exists():
+        for directory, _, files in os.walk("/kaggle/input"):
+            found.update(name for name in files if name in {w[0] for w in WEIGHTS})
+    missing = [item for item in WEIGHTS if item[0] not in found]
+    free = shutil.disk_usage(TMP).free
+    threshold = sum(item[4] for item in missing) + 8_000_000_000
+    report = {
+        "version": "v1", "free_scratch_bytes": free,
+        "minimum_free_scratch_bytes": threshold,
+        "mounted_required_model_names": sorted(found),
+        "missing_required_model_names": [item[0] for item in missing],
+        "model": "SCAIL-2 Q6_K"
+    }
+    write("scail-initial-storage-v1.json", report)
+    if free < threshold:
+        raise RuntimeError(
+            "Insufficient Kaggle scratch storage for SCAIL-2 Q6_K. "
+            "Attach Kaggle model datasets first: "
+            + ", ".join(report["missing_required_model_names"])
+            + f"; free={free:,}, required>={threshold:,} bytes")
+
+
 def main():
     job = json.loads(EMBEDDED_JOB_JSON) if EMBEDDED_JOB_JSON is not None else json.loads(
         Path(__file__).with_name("job-v1.json").read_text(encoding="utf-8"))
     if job.get("version") != "v1" or job.get("model") != "scail2-q6k":
         raise ValueError("Unsupported SCAIL-2 Kaggle job")
+    if "--inner" not in sys.argv:
+        early_storage_preflight()
     if "--inner" not in sys.argv and sys.version_info[:2] != (3, 11):
         python311 = env_python()
         run(python311, __file__, "--inner", timeout=7200)
