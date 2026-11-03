@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v10).
+"""GitHub-to-Kaggle motion rendering bridge (v11).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -174,12 +174,21 @@ def status(args):
     print(cmd("kernels", "status", kernel))
     print("Kaggle kernel: " + kernel)
 
+def status_temporarily_unavailable(error):
+    """Only treat known remote status/API errors as potentially recoverable."""
+    detail = str(error).lower()
+    return any(term in detail for term in (
+        "kernels.get", "authentication required to call the kaggle api",
+        "too many requests", "http 429", "http 403",
+    ))
+
+
 def collect(args, allow_status_denied=False):
     kernel = select_kernel(args)
     try:
         status_text = cmd("kernels", "status", kernel)
     except RuntimeError as exc:
-        if not allow_status_denied or "kernels.get" not in str(exc):
+        if not allow_status_denied or not status_temporarily_unavailable(exc):
             raise
         # A private kernel can become temporarily unreadable via status API.
         # Never infer completion: require actual retrievable output + hashes.
@@ -278,11 +287,12 @@ def monitor(args):
         try:
             status_text = cmd("kernels", "status", kernel)
         except RuntimeError as exc:
-            if "kernels.get" not in str(exc):
+            if not status_temporarily_unavailable(exc):
                 raise
-            # Kaggle intermittently returns HTTP 403 even for the same private
-            # kernel that was previously RUNNING and successfully authenticated.
-            # Try verified output retrieval without resubmitting GPU work.
+            # Kaggle may temporarily deny status for a private running kernel.
+            # In earlier runs, this happened after the exact kernel was RUNNING.
+            # Attempt checksum-verified output retrieval without resubmitting.
+            # Do not mistake a missing/expired credential for completed output.
             status_text = "STATUS_ACCESS_DENIED"
             if status_text != previous:
                 print("Kaggle status became inaccessible; retrying verified output retrieval", flush=True)
