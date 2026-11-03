@@ -1,0 +1,84 @@
+# Targeted VACE masking repair v1. This workflow never launches a Kaggle render.
+name: Kaggle VACE Mask Repair (v1)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kaggle-vace-mask-repair-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair-vace-mask:
+    name: Repair the existing VACE renderer only
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out existing repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Apply the narrowly scoped mask correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("kaggle/renderer/render.py")
+          source = path.read_text(encoding="utf-8")
+
+          original = '''    # VACE interprets BLACK mask regions as control/conditioning; white
+              # regions request unconstrained generation. Previously every motion edge
+              # frame had a white mask, so its guidance was thrown away. For C2V keep
+              # the first-frame image and every following edge map as conditioning.
+              mask = [Image.new("L", (width, height), 0) for _ in range(frames)]'''.replace("              ", "    ")
+
+          corrected = '''    # Preserve the actual source image as first-frame conditioning.
+              # Remaining edge-control frames guide newly GENERATED video frames;
+              # black masks would instead preserve the visible white-on-black edges.
+              mask = [Image.new("L", (width, height), 0)]
+              mask.extend(Image.new("L", (width, height), 255) for _ in range(frames - 1))'''.replace("              ", "    ")
+
+          if source.count(original) == 1:
+              source = source.replace(original, corrected, 1)
+          elif source.count(corrected) == 1:
+              print("VACE mask logic already repaired; no mask changes required.")
+          else:
+              raise SystemExit("Refusing repair: original mask block not uniquely identified")
+
+          versions = [
+              ('Kaggle T4 motion-guided renderer (v11).', 'Kaggle T4 motion-guided renderer (v12).'),
+              ('"renderer_version": "v10", "frames": len(saved_frames)', '"renderer_version": "v12", "frames": len(saved_frames)'),
+              ('"renderer_version": "v10", "control_mask": "black_all_frames"', '"renderer_version": "v12", "control_mask": "first_frame_black_future_white"'),
+              ('"version": "v1", "renderer_version": "v11"', '"version": "v1", "renderer_version": "v12"'),
+          ]
+          for previous, updated in versions:
+              if source.count(previous) == 1:
+                  source = source.replace(previous, updated, 1)
+              elif source.count(updated) == 1:
+                  continue
+              else:
+                  raise SystemExit("Refusing repair: renderer metadata mismatch: " + previous)
+
+          path.write_text(source, encoding="utf-8")
+          print("VACE mask repair applied: first frame conditioned; later frames generation-enabled.")
+          PY
+
+      - name: Commit only the repaired renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- kaggle/renderer/render.py
+          if git diff --cached --quiet; then
+            echo "Renderer already repaired; no commit required."
+          else
+            git commit -m "Repair VACE edge pass-through with generation-enabled future frames (renderer v12)"
+            git push origin HEAD:main
+          fi
+          echo "Repair workflow complete. No Kaggle GPU job was submitted." >> "$GITHUB_STEP_SUMMARY"
