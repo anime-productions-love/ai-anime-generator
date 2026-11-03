@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v2).
+"""GitHub-to-Kaggle motion rendering bridge (v3).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -12,13 +12,11 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from urllib.parse import urlparse, parse_qs
 
 KERNEL_SLUG = "anime-motion"
 OWNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{1,49}$")
-NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-DATASET = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$")
 KERNEL_REF = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$")
-SIMPLE_FILE = re.compile(r"^[A-Za-z0-9_.-]{1,160}$")
 
 def cmd(*args):
     p = subprocess.run(["kaggle", *args], capture_output=True, text=True)
@@ -54,13 +52,27 @@ def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
+def drive_file_id(share_url):
+    """Accept only standard Google Drive file links; never embed signed URLs."""
+    parsed = urlparse(share_url)
+    if parsed.scheme != "https" or parsed.hostname != "drive.google.com" or parsed.port is not None:
+        raise ValueError("Use an https://drive.google.com/file/d/FILE_ID/view link")
+    m = re.fullmatch(r"/file/d/([A-Za-z0-9_-]{15,128})(?:/(?:view|preview|edit))?/?", parsed.path)
+    if m:
+        return m.group(1)
+    if parsed.path in ("/open", "/uc"):
+        ids = parse_qs(parsed.query).get("id", [])
+        if len(ids) == 1 and re.fullmatch(r"[A-Za-z0-9_-]{15,128}", ids[0]):
+            return ids[0]
+    raise ValueError("Unsupported Google Drive URL; use Share > Copy link for a file")
+
+
 def prepare(args):
     username = resolve_username(args.kaggle_username)
-    if not DATASET.fullmatch(args.dataset):
-        raise ValueError("dataset_source must look like kaggle-user/private-asset-dataset")
-    for value in (args.image, args.motion):
-        if not SIMPLE_FILE.fullmatch(value) or value in (".", ".."):
-            raise ValueError("Image/motion must be filenames at the dataset root; no URL or directory paths")
+    image_id = drive_file_id(args.image_drive)
+    motion_id = drive_file_id(args.motion_drive)
+    if image_id == motion_id:
+        raise ValueError("Source image and motion reference must be different Drive files")
     if not re.fullmatch(r"[0-9]{4,24}", args.run_id):
         raise ValueError("Run identifier must be the originating GitHub run ID")
     if not args.prompt.strip() or len(args.prompt) > 2000:
@@ -81,14 +93,14 @@ def prepare(args):
         "code_file": "render.py", "language": "python", "kernel_type": "script",
         "is_private": True, "enable_gpu": True, "enable_internet": True,
         "machine_shape": "NvidiaTeslaT4",
-        "dataset_sources": [args.dataset],
+        "dataset_sources": [],
         "competition_sources": [], "kernel_sources": [], "model_sources": [],
     })
     write_json(folder / "job-v1.json", {
         "version": "v1", "model": "vace-1.3b",
         "source_github_run_id": args.run_id,
-        "dataset_source": args.dataset,
-        "image_path": args.image, "motion_path": args.motion,
+        "source_kind": "google_drive_public_link",
+        "image_drive_file_id": image_id, "motion_drive_file_id": motion_id,
         "prompt": args.prompt, "negative_prompt": args.negative,
         "frames": args.frames, "fps": args.fps,
         "width": args.width, "height": args.height,
@@ -108,7 +120,9 @@ def prepare(args):
     receipt = {
         "version": "v1", "status": "PREPARED_NOT_SUBMITTED",
         "origin_github_run_id": args.run_id, "kernel": kernel,
-        "dataset_source": args.dataset, "gpu_requested": "NvidiaTeslaT4",
+        "source_kind": "google_drive_public_link",
+        "image_drive_file_id": image_id, "motion_drive_file_id": motion_id,
+        "gpu_requested": "NvidiaTeslaT4",
         "gpu_expected": "T4 x2",
         "generation_model": "Wan2.1 VACE 1.3B",
         "human_review_required": True,
@@ -180,9 +194,8 @@ def main():
     a = sub.add_parser("prepare")
     a.add_argument("--kaggle-username", default="")
     a.add_argument("--run-id", required=True)
-    a.add_argument("--dataset", required=True)
-    a.add_argument("--image", required=True)
-    a.add_argument("--motion", required=True)
+    a.add_argument("--image-drive", required=True)
+    a.add_argument("--motion-drive", required=True)
     a.add_argument("--prompt", required=True)
     a.add_argument("--negative", default="")
     a.add_argument("--frames", type=int, default=17)
