@@ -1,5 +1,5 @@
-# Kaggle dual-T4 motion renderer bridge, v7. Accept animated WebP/GIF/MP4 references.
-name: Kaggle GPU Motion Renderer (v7)
+# Kaggle dual-T4 motion renderer bridge, v8. Balanced GPU memory and low-VRAM fallback.
+name: Kaggle GPU Motion Renderer (v8)
 on:
   workflow_dispatch:
     inputs:
