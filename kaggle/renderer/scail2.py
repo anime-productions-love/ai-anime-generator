@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v2).
+"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v3).
 
 Loads an existing, pinned SCAIL-2 API-format ComfyUI graph. No custom diffusion,
 motion mask or pose inference is implemented here. Large weights preferentially
@@ -261,6 +261,16 @@ def animate(job):
     inventory = ensure_models()
     configure_api_workflow()
     image, motion, raw_image, raw_video = get_inputs(job, TMP)
+    # Make every completed ComfyUI segment durable even if later inference
+    # or postprocessing crashes. Kaggle only preserves /kaggle/working.
+    persistent_outputs = OUT / "comfy-output"
+    persistent_outputs.mkdir(parents=True, exist_ok=True)
+    comfy_outputs = COMFY / "output"
+    if comfy_outputs.is_symlink():
+        comfy_outputs.unlink()
+    elif comfy_outputs.exists():
+        raise RuntimeError("Unexpected ComfyUI output directory; refusing to overwrite it")
+    comfy_outputs.symlink_to(persistent_outputs, target_is_directory=True)
     # ComfyUI stays localhost-only. No notebook token or API secret is exposed.
     logfile = (OUT / "comfyui-v1.log").open("w", encoding="utf-8")
     server = subprocess.Popen([
