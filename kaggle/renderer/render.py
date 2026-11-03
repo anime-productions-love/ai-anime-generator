@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v3).
+"""Kaggle dual-T4 experimental motion-guided renderer (v4).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
-Input files live in a Kaggle dataset, not inside a public GitHub workflow input.
+Images and motion MP4s are downloaded from link-viewable Google Drive files.
 No visual quality approval is inferred from a successfully rendered video.
 """
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 import time
 
 OUT = Path("/kaggle/working/anime-render")
-IN = Path("/kaggle/input")
 MODEL = "Wan-AI/Wan2.1-VACE-1.3B-diffusers"
 EMBEDDED_JOB_JSON = None  # Filled by the GitHub submit bridge
 FAIL_NEGATIVE = (
@@ -30,17 +30,26 @@ def sha256(path):
             h.update(data)
     return h.hexdigest()
 
-def required_source(dataset, name):
-    if not dataset or not isinstance(name, str) or not name:
-        raise ValueError("A Kaggle dataset and relative input filename are required")
-    if ".." in Path(name).parts or Path(name).is_absolute():
-        raise ValueError("Unsafe Kaggle dataset path")
-    candidate = (IN / dataset.split("/", 1)[-1] / name).resolve()
-    if not candidate.is_relative_to(IN.resolve()):
-        raise ValueError("Source escaped the Kaggle input directory")
-    if not candidate.is_file():
-        raise FileNotFoundError(f"Input not found: {candidate}; inspect attached Kaggle dataset paths")
-    return candidate
+def download_drive_source(file_id, target_name):
+    """Download only a constrained Drive file ID, not an arbitrary remote URL."""
+    if not isinstance(file_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{15,128}", file_id):
+        raise ValueError("Invalid Google Drive file identifier")
+    if target_name not in ("source-image.bin", "motion-reference.mp4"):
+        raise ValueError("Unsupported source destination")
+    import gdown
+    directory = Path("/kaggle/working/source-input")
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / target_name
+    try:
+        downloaded = gdown.download(id=file_id, output=str(target), quiet=True)
+    except Exception as exc:
+        raise RuntimeError(
+            "Google Drive download failed; check Anyone with the link -> Viewer, "
+            "file availability, and Drive download quota"
+        ) from exc
+    if not downloaded or not target.is_file() or not (1 <= target.stat().st_size <= 1024 * 1024 * 1024):
+        raise RuntimeError("Google Drive source is missing, empty, or too large")
+    return target
 
 def frames_from_reference(video, count, width, height):
     import cv2
@@ -75,7 +84,7 @@ def main():
     subprocess.run([
         sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
         "-q", "diffusers==0.35.2", "transformers==4.57.1",
-        "accelerate==1.11.0", "ftfy", "sentencepiece"
+        "accelerate==1.11.0", "ftfy", "sentencepiece", "gdown>=5.2,<6"
     ], check=True)
     import torch
     import cv2
@@ -95,9 +104,10 @@ def main():
         raise RuntimeError("Expected Kaggle T4 accelerator; actual " + repr(cards))
     # The pipeline uses ONE T4 with CPU offload. A second T4 is available
     # but is NOT automatically combined into a 32 GB memory pool.
-    dataset = job["dataset_source"]
-    image_file = required_source(dataset, job["image_path"])
-    motion_file = required_source(dataset, job["motion_path"])
+    if job.get("source_kind") != "google_drive_public_link":
+        raise ValueError("Unsupported input storage source")
+    image_file = download_drive_source(job["image_drive_file_id"], "source-image.bin")
+    motion_file = download_drive_source(job["motion_drive_file_id"], "motion-reference.mp4")
     width, height = int(job["width"]), int(job["height"])
     frames = int(job["frames"])
     steps = int(job["steps"])
@@ -153,7 +163,9 @@ def main():
         result = {
             "version": "v1", "status": "RENDERED_UNREVIEWED",
             "model": MODEL, "motion_control": "experimental_edge_guidance",
-            "gpus": cards, "dataset_source": dataset,
+            "gpus": cards, "source_kind": "google_drive_public_link",
+            "image_drive_file_id": job["image_drive_file_id"],
+            "motion_drive_file_id": job["motion_drive_file_id"],
             "image_sha256": sha256(image_file),
             "reference_sha256": sha256(motion_file),
             "video_sha256": sha256(target),
