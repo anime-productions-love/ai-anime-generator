@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v4).
+"""GitHub-to-Kaggle motion rendering bridge (v5).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 from urllib.parse import urlparse, parse_qs
 
 KERNEL_SLUG = "anime-motion"
@@ -197,6 +198,35 @@ def collect(args):
     })
     print("Verified Kaggle video and last-frame checksums. NOT approved to chain.")
 
+def monitor(args):
+    """Observe exact Kaggle kernel until verified success, real failure, or deadline."""
+    kernel = select_kernel(args)
+    deadline = time.monotonic() + args.timeout_seconds
+    previous = None
+    while True:
+        status_text = cmd("kernels", "status", kernel)
+        if status_text != previous:
+            print("Remote Kaggle status: " + status_text[:1000], flush=True)
+            previous = status_text
+        if re.search(r"\b(error|failed|cancelled|canceled)\b", status_text, flags=re.I):
+            failure_dir = Path(args.output) / "remote-failure"
+            failure_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                cmd("kernels", "output", kernel, "-p", str(failure_dir), "-o")
+                for failure in failure_dir.rglob("failure-v1.json"):
+                    print("Remote render failure manifest: " + failure.read_text(encoding="utf-8")[:14000], flush=True)
+            except Exception as exc:
+                print("Could not download Kaggle failure output: " + str(exc)[:600], flush=True)
+            raise RuntimeError("Kaggle execution failed: " + kernel)
+        if re.search(r"\b(complete|completed|success)\b", status_text, flags=re.I):
+            collect(args)
+            return
+        if not re.search(r"\b(pending|queued|running|in progress)\b", status_text, flags=re.I):
+            raise RuntimeError("Unrecognized Kaggle kernel state: " + status_text[:500])
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Kaggle still running when GitHub monitor deadline expired; do not resubmit without checking kernel")
+        time.sleep(min(30, max(1, deadline - time.monotonic())))
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="action", required=True)
@@ -218,16 +248,18 @@ def main():
     a = sub.add_parser("submit")
     a.add_argument("--path", required=True)
     a.add_argument("--receipt", required=True)
-    for act in ("status", "collect"):
+    for act in ("status", "collect", "monitor"):
         a = sub.add_parser(act)
         a.add_argument("--kaggle-username", default="")
         a.add_argument("--kernel", default="")
         a.add_argument("--source-run-id", default="")
-        if act == "collect":
+        if act in ("collect", "monitor"):
             a.add_argument("--output", required=True)
+        if act == "monitor":
+            a.add_argument("--timeout-seconds", type=int, default=4200)
     args = p.parse_args()
     {"prepare": prepare, "submit": submit, "status": status,
-     "collect": collect}[args.action](args)
+     "collect": collect, "monitor": monitor}[args.action](args)
 
 if __name__ == "__main__":
     main()
