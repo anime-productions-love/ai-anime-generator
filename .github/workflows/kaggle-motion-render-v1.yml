@@ -1,4 +1,4 @@
-# Kaggle motion renderer bridge, v21. Source-specific status recovery for previously submitted kernels.
+# Kaggle motion renderer bridge, v21. Source-specific status recovery for previously submitted kernels. Read-only recovery request.
 name: Kaggle GPU Motion Renderer (v21)
 on:
   push:
