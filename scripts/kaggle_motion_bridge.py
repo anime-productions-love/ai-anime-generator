@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v7).
+"""GitHub-to-Kaggle motion rendering bridge (v8).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -181,7 +181,7 @@ def collect(args, allow_status_denied=False):
         raise RuntimeError("Kaggle render failed; inspect Kaggle notebook execution logs")
     if re.search(r"\b(pending|queued|running|in progress)\b", status_text, flags=re.I):
         raise RuntimeError("Kaggle render is still pending/running; re-run retrieve later (do not resubmit)")
-    if not re.search(r"\b(complete|completed|success)\b", status_text, flags=re.I):
+    if status_text and not re.search(r"\b(complete|completed|success)\b", status_text, flags=re.I):
         raise RuntimeError("Unrecognized Kaggle status; refusing to download a possibly unfinished version")
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
