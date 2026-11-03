@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v5).
+"""GitHub-to-Kaggle motion rendering bridge (v6).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -15,7 +15,7 @@ import subprocess
 import time
 from urllib.parse import urlparse, parse_qs
 
-KERNEL_SLUG = "anime-motion"
+KERNEL_SLUG = "anime-motion-render"
 OWNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{1,49}$")
 KERNEL_REF = re.compile(r"^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$")
 
@@ -144,7 +144,7 @@ def submit(args):
     receipt = json.loads(Path(args.receipt).read_text(encoding="utf-8"))
     if receipt.get("status") != "PREPARED_NOT_SUBMITTED":
         raise ValueError("Job receipt not in prepared state")
-    cmd("kernels", "push", "-p", args.path, "--accelerator", "NvidiaTeslaT4")
+    print("Kaggle CLI push output: " + cmd("kernels", "push", "-p", args.path, "--accelerator", "NvidiaTeslaT4")[:800], flush=True)
     receipt["status"] = "SUBMITTED_TO_KAGGLE_NOT_YET_RENDERED"
     write_json(args.receipt, receipt)
     print(f"Kaggle accepted kernel submission: {receipt['kernel']}")
