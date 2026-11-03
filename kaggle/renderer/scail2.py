@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v1).
+"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v2).
 
 Loads an existing, pinned SCAIL-2 API-format ComfyUI graph. No custom diffusion,
 motion mask or pose inference is implemented here. Large weights preferentially
@@ -93,7 +93,16 @@ def env_python():
     run(uv, "python", "install", "3.11", timeout=400)
     venv = TMP / "py311"
     run(uv, "venv", "--python", "3.11", str(venv), timeout=300)
-    return str(venv / "bin/python")
+    py = str(venv / "bin/python")
+    # Python 3.13 Kaggle base packages cannot be imported by Python 3.11.
+    # Install a T4-compatible CUDA build in the isolated environment.
+    run(uv, "pip", "install", "--python", py,
+        "--index-url", "https://download.pytorch.org/whl/cu128",
+        "torch==2.8.0", "torchvision==0.23.0", timeout=2400)
+    run(uv, "pip", "install", "--python", py,
+        "gdown>=5.2,<6", "huggingface_hub>=0.36,<1", "Pillow>=10,<13",
+        timeout=700)
+    return py
 
 def get_inputs(job, root):
     import gdown
@@ -247,8 +256,9 @@ def animate(job):
         "compute_capability": [torch.cuda.get_device_capability(i) for i in range(2)],
         "scratch_bytes_free": shutil.disk_usage(TMP).free,
     })
-    inventory = ensure_models()
+    # Ensure the ComfyUI runtime and model download libraries are available.
     install_components()
+    inventory = ensure_models()
     configure_api_workflow()
     image, motion, raw_image, raw_video = get_inputs(job, TMP)
     # ComfyUI stays localhost-only. No notebook token or API secret is exposed.
