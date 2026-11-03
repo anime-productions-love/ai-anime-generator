@@ -1,4 +1,4 @@
-# Kaggle motion renderer bridge, v16. Add selectable SCAIL-2 Q6_K notebook backend.
+# Kaggle motion renderer bridge, v16. Add selectable SCAIL-2 Q6_K notebook backend. First Q6_K launch.
 name: Kaggle GPU Motion Renderer (v16)
 on:
   push:
