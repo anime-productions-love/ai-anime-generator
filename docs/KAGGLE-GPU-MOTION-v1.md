@@ -1,11 +1,11 @@
-# Kaggle GPU Motion Rendering Integration — v4
+# Kaggle GPU Motion Rendering Integration — v5
 
 ## Implementation status
 
 Uses the existing `anime-productions-love/ai-anime-generator` pipeline:
 
-- [Kaggle GPU Motion Renderer (v4)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
-- [Bridge v3](../scripts/kaggle_motion_bridge.py) — extracts and validates Google Drive file IDs before submitting an isolated private Kaggle notebook.
+- [Kaggle GPU Motion Renderer (v6)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
+- [Bridge v4](../scripts/kaggle_motion_bridge.py) — extracts and validates Google Drive file IDs before submitting an isolated private Kaggle notebook.
 - [GPU renderer v5](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4 directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
 - [Existing private gallery archiver v3](../scripts/archive_gallery.py) — permanently archives retrieved, checksum-verified results.
 
@@ -32,7 +32,7 @@ Go to https://github.com/anime-productions-love/ai-anime-generator/actions/workf
 - `motion_drive_url`: the copied Google Drive motion-MP4 link
 - `prompt`: a non-confidential description of the intended animation
 - `negative_prompt`: optional description of artifacts to avoid, appended to built-in safeguards
-- `frames`: `17` to begin (valid range 5–81, in 4n+1 increments)
+- `frames`: `17` to begin (request any whole number from 5–81; bridge rounds to nearest supported 4n+1 value, with halfway values rounded upward; requested and applied counts are recorded in submission receipt and job metadata)
 - `fps`: `8` for initial review
 
 The bridge does not need the URLs until this submission form is filled in. It validates the URLs, stores only their Drive file IDs in the private Kaggle notebook code, sets `dataset_sources` to an empty list and submits a new per-run private `NvidiaTeslaT4` Kaggle kernel. Internet access is enabled for the Google Drive and model downloads. Its submit receipt is not proof of a render; check the actual Kaggle notebook status.
