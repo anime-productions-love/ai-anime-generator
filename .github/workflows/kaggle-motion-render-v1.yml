@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v10. Monitor and retrieve real Kaggle render results.
-name: Kaggle GPU Motion Renderer (v10)
+# Kaggle motion renderer bridge, v11. Correct live Kaggle kernel slug monitoring.
+name: Kaggle GPU Motion Renderer (v11)
 on:
   push:
     branches: [main]
