@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v1).
+"""GitHub-to-Kaggle motion rendering bridge (v2).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -74,7 +74,7 @@ def prepare(args):
     kernel = f"{username}/{KERNEL_SLUG}-{args.run_id}"
     folder = Path(args.path)
     folder.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(Path(__file__).resolve().parents[1] / "kaggle/renderer/render.py", folder / "render.py")
+    source_renderer = Path(__file__).resolve().parents[1] / "kaggle/renderer/render.py"
     write_json(folder / "kernel-metadata.json", {
         "id": kernel,
         "title": f"Anime Motion Render {args.run_id}",
@@ -95,6 +95,16 @@ def prepare(args):
         "steps": args.steps, "seed": args.seed,
         "approval_status": "RENDER_REQUESTED_ONLY"
     })
+    # Kaggle's push API treats code_file as its authoritative script;
+    # embed the job in that script so data survives even if extra
+    # sibling JSON files are not copied into the notebook version.
+    script = source_renderer.read_text(encoding="utf-8")
+    token = "EMBEDDED_JOB_JSON = None  # Filled by the GitHub submit bridge"
+    if script.count(token) != 1:
+        raise ValueError("Renderer job-injection marker missing or ambiguous")
+    job_json = (folder / "job-v1.json").read_text(encoding="utf-8")
+    script = script.replace(token, "EMBEDDED_JOB_JSON = " + repr(job_json))
+    (folder / "render.py").write_text(script, encoding="utf-8")
     receipt = {
         "version": "v1", "status": "PREPARED_NOT_SUBMITTED",
         "origin_github_run_id": args.run_id, "kernel": kernel,
