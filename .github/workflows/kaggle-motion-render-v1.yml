@@ -1,4 +1,4 @@
-# Kaggle motion renderer bridge, v17. Source-targeted salvage prints installer diagnostics. Retry after uv-pip environment repair.
+# Kaggle motion renderer bridge, v17. Source-targeted salvage prints installer diagnostics. Retry after output directory repair.
 name: Kaggle GPU Motion Renderer (v17)
 on:
   push:
