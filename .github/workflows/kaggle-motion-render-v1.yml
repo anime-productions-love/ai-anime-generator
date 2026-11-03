@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v18. Include ComfyUI and inference logs in salvage diagnostics.
-name: Kaggle GPU Motion Renderer (v18)
+# Kaggle motion renderer bridge, v19. Recover exact SCAIL-2 Kaggle kernel without GPU resubmission.
+name: Kaggle GPU Motion Renderer (v19)
 on:
   push:
     branches: [main]
