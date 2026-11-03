@@ -1,4 +1,4 @@
-# AI Anime Story Generator — v15
+# AI Anime Story Generator — v16
 
 A Git-backed production system for **anime characters, reusable environments, sequential illustrations, comic pages, and video-ready storyboards**. Phase 1 saves characters and scenes; Phase 2 generates images; Phase 3 adds visual-reference conditioning and distributed CPU LoRA-training integration; Phase 4 publishes comic pages and video handoffs.
 
@@ -53,7 +53,7 @@ The [Kaggle GPU Motion Renderer workflow v2](.github/workflows/kaggle-motion-ren
 
 The included [experimental Wan VACE 1.3B renderer v3](kaggle/renderer/render.py) uses an anime character image and reference video's edge-motion information; it is not yet confirmed to faithfully transfer full human pose and expression. It uses only one T4 with CPU offload, not two GPUs of combined VRAM. **Neither the API submission nor actual Kaggle GPU rendering has been executed or verified.** It never automatically chains unreviewed output into another scene.
 
-[Complete Kaggle connection, private dataset and retrieval instructions v1](docs/KAGGLE-GPU-MOTION-v1.md).
+[Complete Kaggle connection, private dataset and retrieval instructions v2](docs/KAGGLE-GPU-MOTION-v1.md).
 
 ## Four-runner AI Story Director (three selectable open-weight models)
 
