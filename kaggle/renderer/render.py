@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle T4 motion-guided renderer (v9).
+"""Kaggle T4 motion-guided renderer (v10).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
@@ -114,7 +114,8 @@ def main():
     ], check=True)
     import torch
     import cv2
-    from PIL import Image, ImageOps
+    import numpy as np
+    from PIL import Image, ImageOps, ImageStat
     from diffusers import AutoencoderKLWan, WanVACEPipeline
     from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
     from diffusers.utils import export_to_video
@@ -198,6 +199,23 @@ def main():
             latents = callback_kwargs["latents"]
             if not bool(torch.isfinite(latents).all().item()):
                 raise RuntimeError(f"Invalid non-finite denoising latents at step {step}")
+            # Keep one overwritten, clearly non-rendered latent checkpoint.
+            # A failure mid-inference must not erase all expensive GPU progress.
+            # This is for inspection/recovery and is NOT a resumable video.
+            if (step + 1) % 5 == 0:
+                try:
+                    tmp = OUT / "progress-latents.pt.tmp"
+                    torch.save({"step": step + 1, "latents": latents.detach().to(
+                        device="cpu", dtype=torch.float16)}, tmp)
+                    os.replace(tmp, OUT / "progress-latents.pt")
+                    (OUT / "progress-v1.json").write_text(json.dumps({
+                        "version": "v1", "status": "PARTIAL_LATENTS_NOT_VIDEO",
+                        "completed_denoising_steps": step + 1,
+                        "total_steps": steps, "resumable": False
+                    }, indent=2) + "\n", encoding="utf-8")
+                    print(f"Preserved non-video denoising checkpoint at step {step + 1}/{steps}", flush=True)
+                except Exception as checkpoint_exc:
+                    print("Checkpoint preservation warning: " + str(checkpoint_exc)[:300], flush=True)
             return callback_kwargs
 
         generated = pipe(
@@ -212,11 +230,51 @@ def main():
             callback_on_step_end=reject_invalid_latents,
             callback_on_step_end_tensor_inputs=["latents"],
         ).frames[0]
-        # Detect the previously observed collapse into black frames before
-        # calling an encode, checksum, or gallery archive a successful render.
-        from PIL import ImageStat
+        # FIRST preserve the expensive result. Validation must never run
+        # before raw frames are independently durable in /kaggle/working.
+        # Diffusers returns NumPy RGB frames here, not PIL images.
+        frame_folder = OUT / "generated-frames"
+        frame_folder.mkdir(parents=True, exist_ok=True)
+        saved_frames = []
+        for index, frame in enumerate(generated):
+            if isinstance(frame, Image.Image):
+                rgb = frame.convert("RGB")
+            else:
+                array = np.asarray(frame)
+                if array.ndim != 3 or array.shape[2] not in (3, 4):
+                    raise RuntimeError(f"Unexpected decoded frame shape at index {index}: {array.shape}")
+                if array.dtype != np.uint8:
+                    if not bool(np.isfinite(array).all()):
+                        raise RuntimeError(f"Non-finite decoded frame at index {index}")
+                    if np.issubdtype(array.dtype, np.floating) and float(array.max()) <= 1:
+                        array = array * 255
+                    array = np.clip(array, 0, 255).astype(np.uint8)
+                rgb = Image.fromarray(array).convert("RGB")
+            frame_path = frame_folder / f"frame-{index:04d}.png"
+            rgb.save(frame_path)
+            saved_frames.append(rgb)
+        (OUT / "last_frame.png").write_bytes((frame_folder / f"frame-{len(saved_frames)-1:04d}.png").read_bytes())
+        raw = {
+            "version": "v1", "status": "GENERATED_FRAMES_SAVED_UNREVIEWED",
+            "renderer_version": "v10", "frames": len(saved_frames), "fps": fps,
+            "frame_directory": "generated-frames",
+            "last_frame_sha256": sha256(OUT / "last_frame.png"),
+            "human_review_required": True, "approved_to_chain": False,
+        }
+        (OUT / "raw-output-v1.json").write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        print(f"Preserved {len(saved_frames)} raw generated PNG frames before checks", flush=True)
+
+        target = OUT / "video.mp4"
+        export_to_video(saved_frames, str(target), fps=fps)
+        if not target.is_file() or target.stat().st_size < 1000:
+            raise RuntimeError("Model returned no usable video; PNG frames have been preserved")
+        raw.update(status="GENERATED_VIDEO_SAVED_UNREVIEWED", video_sha256=sha256(target))
+        (OUT / "raw-output-v1.json").write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        print("Preserved raw video.mp4 before quality checks", flush=True)
+
+        # Optional quality rejection cannot delete or obscure the video/PNGs.
         frame_luma = [round(ImageStat.Stat(f.convert("L").resize((64, 64))).mean[0], 2)
-                      for f in generated]
+                      for f in saved_frames]
         input_luma = float(ImageStat.Stat(image.convert("L").resize((64, 64))).mean[0])
         cutoff = max(12.0, input_luma * 0.22)
         collapsed_count = sum(v < cutoff for v in frame_luma)
@@ -224,18 +282,8 @@ def main():
               (input_luma, cutoff, frame_luma), flush=True)
         if input_luma >= 45 and collapsed_count >= max(3, len(frame_luma) // 3):
             raise RuntimeError("Rendered frame brightness collapsed compared to source image; "
-                               f"{collapsed_count}/{len(frame_luma)} frames below {cutoff:.1f}")
-        target = OUT / "video.mp4"
-        export_to_video(generated, str(target), fps=fps)
-        if not target.is_file() or target.stat().st_size < 1000:
-            raise RuntimeError("Model returned no usable video")
-        subprocess.run([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-i", str(target), "-vf", f"select=eq(n\\,{frames - 1})",
-            "-vsync", "0", "-frames:v", "1", str(OUT / "last_frame.png")
-        ], check=True)
-        if not (OUT / "last_frame.png").is_file():
-            raise RuntimeError("Missing last frame")
+                               f"{collapsed_count}/{len(frame_luma)} frames below {cutoff:.1f}; "
+                               "raw video and frames were retained")
         result = {
             "version": "v1", "status": "RENDERED_UNREVIEWED",
             "model": MODEL, "motion_control": "experimental_edge_guidance",
@@ -248,7 +296,7 @@ def main():
             "video_sha256": sha256(target),
             "last_frame_sha256": sha256(OUT / "last_frame.png"),
             "frames": frames, "fps": fps, "steps": steps, "seed": int(job["seed"]),
-            "renderer_version": "v9", "control_mask": "black_all_frames",
+            "renderer_version": "v10", "control_mask": "black_all_frames",
             "model_dtype": "float32", "input_luma": round(input_luma, 2),
             "frame_luma": frame_luma,
             "duration_seconds": round(time.time() - started, 2),
@@ -267,8 +315,18 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         OUT.mkdir(parents=True, exist_ok=True)
+        artifacts = []
+        for item in sorted(OUT.rglob("*")):
+            if item.is_file() and not item.is_symlink():
+                artifacts.append({
+                    "path": item.relative_to(OUT).as_posix(),
+                    "size_bytes": item.stat().st_size,
+                    "sha256": sha256(item)
+                })
         (OUT / "failure-v1.json").write_text(json.dumps({
-            "version": "v1", "status": "RENDER_FAILED", "reason": str(exc),
-            "traceback": traceback.format_exc()[-12000:]
+            "version": "v1", "status": "RENDER_FAILED_OUTPUTS_PRESERVED",
+            "reason": str(exc), "traceback": traceback.format_exc()[-12000:],
+            "available_artifacts": artifacts,
+            "approved_to_chain": False
         }, indent=2) + "\n", encoding="utf-8")
         raise
