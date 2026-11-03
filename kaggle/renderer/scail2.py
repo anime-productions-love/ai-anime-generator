@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v4).
+"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v5).
 
 Loads an existing, pinned SCAIL-2 API-format ComfyUI graph. No custom diffusion,
 motion mask or pose inference is implemented here. Large weights preferentially
@@ -51,8 +51,19 @@ WEIGHTS = [
      500_000_000),
 ]
 def run(*command, cwd=None, timeout=900):
-    print("RUN " + " ".join(map(str, command[:4])), flush=True)
-    subprocess.run(list(map(str, command)), cwd=cwd, check=True, timeout=timeout)
+    OUT.mkdir(parents=True, exist_ok=True)
+    heading = "RUN " + " ".join(map(str, command[:4]))
+    print(heading, flush=True)
+    # Persist upstream installer errors in Kaggle's saved working directory.
+    with (OUT / "scail-install-v1.log").open("a", encoding="utf-8") as log:
+        log.write(heading + "\n")
+        log.flush()
+        try:
+            subprocess.run(list(map(str, command)), cwd=cwd, check=True,
+                           stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+        except Exception:
+            log.flush()
+            raise
 
 def sha(path):
     h = hashlib.sha256()
@@ -399,7 +410,10 @@ if __name__ == "__main__":
             "path": x.relative_to(OUT).as_posix(), "size_bytes": x.stat().st_size,
             "sha256": sha(x)
         } for x in sorted(OUT.rglob("*")) if x.is_file()]
-        write("failure-v1.json", {
+        # The outer Kaggle Python 3.13 process must not overwrite the more
+        # diagnostic exception from the isolated Python 3.11 child.
+        failure_name = "failure-inner-v1.json" if "--inner" in sys.argv else "failure-v1.json"
+        write(failure_name, {
             "version": "v1", "status": "SCAIL2_FAILED_OUTPUTS_PRESERVED",
             "reason": str(error), "traceback": traceback.format_exc()[-10000:],
             "files": files, "approved_to_chain": False,
