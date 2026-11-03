@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v5).
+"""Kaggle dual-T4 experimental motion-guided renderer (v6).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
-Images and motion MP4s are downloaded from link-viewable Google Drive files.
+Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
 No visual quality approval is inferred from a successfully rendered video.
 """
 import hashlib
@@ -53,28 +53,53 @@ def download_drive_source(file_id, target_name):
 
 def frames_from_reference(video, count, width, height):
     import cv2
-    from PIL import Image
-    cap = cv2.VideoCapture(str(video))
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total < 2:
-        raise ValueError("Driving video has fewer than two decodable frames")
-    samples = []
-    for n in range(count):
-        idx = round(n * (total - 1) / max(1, count - 1))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-        ok, frame = cap.read()
-        if not ok:
-            cap.release()
-            raise ValueError(f"Could not decode driving reference frame {idx}")
+    import numpy as np
+    from PIL import Image, UnidentifiedImageError
+
+    def edge_image(frame, rgb=False):
         frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
-        # Edge conditioning is a first-stage motion approximation, not
-        # human pose/face retargeting. It removes most reference video color.
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY if rgb else cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 65, 150)
-        edge_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
-        samples.append(Image.fromarray(edge_rgb))
-    cap.release()
-    return samples
+        return Image.fromarray(cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB))
+
+    # gdown stores the source under a fixed local name, so detect by file
+    # signature rather than relying on its misleading .mp4 suffix.
+    try:
+        animated = Image.open(video)
+    except (UnidentifiedImageError, OSError):
+        animated = None
+    if animated is not None:
+        with animated:
+            if animated.format not in ("WEBP", "GIF"):
+                raise ValueError("Motion reference is a still image; provide animated WebP, GIF, or a video")
+            total = int(getattr(animated, "n_frames", 1))
+            if total < 2:
+                raise ValueError("Animated motion reference must contain at least two frames")
+            samples = []
+            for n in range(count):
+                idx = round(n * (total - 1) / max(1, count - 1))
+                animated.seek(idx)
+                samples.append(edge_image(np.asarray(animated.convert("RGB")), rgb=True))
+            print(f"Reference motion decoded: {total} animated {animated.format} frames")
+            return samples
+
+    cap = cv2.VideoCapture(str(video))
+    try:
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total < 2:
+            raise ValueError("Video reference has fewer than two decodable frames; check file type or codec")
+        samples = []
+        for n in range(count):
+            idx = round(n * (total - 1) / max(1, count - 1))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if not ok:
+                raise ValueError(f"Could not decode reference video frame {idx}")
+            samples.append(edge_image(frame))
+        print(f"Reference motion decoded: {total} video frames")
+        return samples
+    finally:
+        cap.release()
 
 def main():
     # Notebook code itself carries the approved JSON so Kaggle CLI upload
