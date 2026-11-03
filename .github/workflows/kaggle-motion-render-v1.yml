@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v14. Fresh authorized GPU submission via existing file trigger.
-name: Kaggle GPU Motion Renderer (v14)
+# Kaggle motion renderer bridge, v15. Salvage incomplete outputs without GPU rerun.
+name: Kaggle GPU Motion Renderer (v15)
 on:
   push:
     branches: [main]
@@ -58,7 +58,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   kaggle-bridge:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-monitor]')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-monitor]') || contains(github.event.head_commit.message, '[kaggle-salvage]')
     name: Kaggle ${{ inputs.operation || 'submit' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -75,6 +75,7 @@ jobs:
       KG_SOURCE_RUN: ${{ inputs.source_run_id }}
       KG_KERNEL: ${{ inputs.kernel }}
       MONITOR_PRIOR: ${{ contains(github.event.head_commit.message, '[kaggle-monitor]') }}
+      SALVAGE_PRIOR: ${{ contains(github.event.head_commit.message, '[kaggle-salvage]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -124,7 +125,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Monitor Kaggle to verified output and archive
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[kaggle-salvage]')
         shell: bash
         run: |
           set -euo pipefail
@@ -140,6 +141,25 @@ jobs:
           python3 scripts/archive_gallery.py \
             --run-id "$GITHUB_RUN_ID" --kind kaggle \
             --source "$RUNNER_TEMP/kaggle-result"
+      - name: Recover all available media from failed Kaggle job
+        if: always() && github.event_name == 'push' && (contains(github.event.head_commit.message, '[kaggle-salvage]') || failure())
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$SALVAGE_PRIOR" = "true" ]; then
+            source_id="41589905361"
+          elif [ "$MONITOR_PRIOR" = "true" ]; then
+            source_id="41587220856"
+          else
+            source_id="$GITHUB_RUN_ID"
+          fi
+          python3 scripts/kaggle_motion_bridge.py salvage \
+            --kaggle-username "$KG_USER" --source-run-id "$source_id" \
+            --output "$RUNNER_TEMP/kaggle-salvage"
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind kaggle \
+            --source "$RUNNER_TEMP/kaggle-salvage"
+          echo "Salvaged failed kernel $source_id; NOT approved for chaining" >> "$GITHUB_STEP_SUMMARY"
       - name: Collect and verify actual Kaggle video
         if: inputs.operation == 'retrieve'
         shell: bash
