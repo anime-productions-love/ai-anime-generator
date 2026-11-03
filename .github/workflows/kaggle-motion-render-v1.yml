@@ -1,4 +1,4 @@
-# Kaggle motion renderer bridge, v15. Salvage incomplete outputs without GPU rerun.
+# Kaggle motion renderer bridge, v15. Salvage incomplete outputs without GPU rerun. Trigger marker: 20261103-1.
 name: Kaggle GPU Motion Renderer (v15)
 on:
   push:
