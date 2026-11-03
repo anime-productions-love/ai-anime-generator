@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v5).
+"""SCAIL-2 Q6_K Kaggle ComfyUI notebook driver (v6).
 
 Loads an existing, pinned SCAIL-2 API-format ComfyUI graph. No custom diffusion,
 motion mask or pose inference is implemented here. Large weights preferentially
@@ -210,16 +210,23 @@ def install_components():
         clone(name, root / "custom_nodes")
     clone("scail2-skill", TMP)
     py = sys.executable
-    run(py, "-m", "pip", "install", "--disable-pip-version-check", "-q",
-        "-r", root / "requirements.txt", timeout=1500)
+    # uv venv intentionally excludes pip; install through uv pip instead of
+    # invoking python -m pip, which fails with "No module named pip".
+    uv = shutil.which("uv")
+    def install(*packages, timeout=1200):
+        if uv:
+            run(uv, "pip", "install", "--python", py, *packages, timeout=timeout)
+        else:
+            run(py, "-m", "pip", "install", "--disable-pip-version-check",
+                *packages, timeout=timeout)
+    install("-r", str(root / "requirements.txt"), timeout=1500)
     for name in ("ComfyUI-GGUF", "ComfyUI-VideoHelperSuite", "ComfyUI-KJNodes",
                  "ComfyUI-Easy-Use", "ComfyUI-Custom-Scripts"):
         req = root / "custom_nodes" / name / "requirements.txt"
         if req.is_file():
-            run(py, "-m", "pip", "install", "--disable-pip-version-check", "-q",
-                "-r", req, timeout=1200)
-    run(py, "-m", "pip", "install", "-q", "gdown>=5.2,<6",
-        "huggingface_hub>=0.36,<1", "Pillow>=10,<13", timeout=800)
+            install("-r", str(req), timeout=1200)
+    install("gdown>=5.2,<6", "huggingface_hub>=0.36,<1",
+            "Pillow>=10,<13", timeout=800)
     return root
 
 def configure_api_workflow():
