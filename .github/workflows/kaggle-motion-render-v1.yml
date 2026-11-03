@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v20. Safely identify API credential expiry without revealing secrets. Read-only authentication recovery for existing Kaggle notebook.
-name: Kaggle GPU Motion Renderer (v20)
+# Kaggle motion renderer bridge, v21. Source-specific status recovery for previously submitted kernels.
+name: Kaggle GPU Motion Renderer (v21)
 on:
   push:
     branches: [main]
@@ -72,7 +72,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   kaggle-bridge:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-scail]') || contains(github.event.head_commit.message, '[kaggle-monitor]') || contains(github.event.head_commit.message, '[kaggle-salvage')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-scail]') || contains(github.event.head_commit.message, '[kaggle-monitor') || contains(github.event.head_commit.message, '[kaggle-salvage')
     name: Kaggle ${{ inputs.operation || 'submit' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -91,7 +91,7 @@ jobs:
       KG_FPS: ${{ inputs.fps || 8 }}
       KG_SOURCE_RUN: ${{ inputs.source_run_id }}
       KG_KERNEL: ${{ inputs.kernel }}
-      MONITOR_PRIOR: ${{ contains(github.event.head_commit.message, '[kaggle-monitor]') }}
+      MONITOR_PRIOR: ${{ contains(github.event.head_commit.message, '[kaggle-monitor') }}
       SALVAGE_PRIOR: ${{ contains(github.event.head_commit.message, '[kaggle-salvage') }}
     steps:
       - uses: actions/checkout@v4
@@ -182,13 +182,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$MONITOR_PRIOR" = "true" ]; then
-            source_id="41587220856"
+            source_id=$(git log -1 --format=%s | sed -n 's/.*\[kaggle-monitor:\([0-9][0-9]*\)\].*/\1/p')
+            source_id="${source_id:-41587220856}"
+            monitor_timeout=900
+            [[ "$source_id" =~ ^[0-9]{4,24}$ ]] || { echo "::error::Invalid monitored run ID"; exit 1; }
           else
             source_id="$GITHUB_RUN_ID"
+            monitor_timeout=4200
           fi
           python3 scripts/kaggle_motion_bridge.py monitor \
             --kaggle-username "$KG_USER" --source-run-id "$source_id" \
-            --output "$RUNNER_TEMP/kaggle-result" --timeout-seconds 4200
+            --output "$RUNNER_TEMP/kaggle-result" --timeout-seconds "$monitor_timeout"
           echo "Kaggle returned validated render assets for $source_id" >> "$GITHUB_STEP_SUMMARY"
           python3 scripts/archive_gallery.py \
             --run-id "$GITHUB_RUN_ID" --kind kaggle \
@@ -207,7 +211,9 @@ jobs:
               exit 1
             fi
           elif [ "$MONITOR_PRIOR" = "true" ]; then
-            source_id="41587220856"
+            source_id=$(git log -1 --format=%s | sed -n 's/.*\[kaggle-monitor:\([0-9][0-9]*\)\].*/\1/p')
+            source_id="${source_id:-41587220856}"
+            [[ "$source_id" =~ ^[0-9]{4,24}$ ]] || { echo "::error::Invalid monitored run ID"; exit 1; }
           else
             source_id="$GITHUB_RUN_ID"
           fi
