@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v11. Correct live Kaggle kernel slug monitoring.
-name: Kaggle GPU Motion Renderer (v11)
+# Kaggle motion renderer bridge, v12. Retry exact private kernel without resubmission.
+name: Kaggle GPU Motion Renderer (v12)
 on:
   push:
     branches: [main]
@@ -128,7 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$MONITOR_PRIOR" = "true" ]; then
-            source_id="41585877699"
+            source_id="41587220856"
           else
             source_id="$GITHUB_RUN_ID"
           fi
