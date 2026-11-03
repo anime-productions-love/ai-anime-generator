@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v8).
+"""GitHub-to-Kaggle motion rendering bridge (v9).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -207,6 +207,58 @@ def collect(args, allow_status_denied=False):
     })
     print("Verified Kaggle video and last-frame checksums. NOT approved to chain.")
 
+def salvage(args):
+    """Retrieve and account for ALL extant outputs even from a failed notebook.
+
+    A salvaged result is never a successful render and never approved to chain.
+    This is independent of Kaggle's private-kernel status endpoint.
+    """
+    kernel = select_kernel(args)
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    try:
+        cmd("kernels", "output", kernel, "-p", str(output), "-o")
+    except RuntimeError as error:
+        # The monitor may already have fetched some actual outputs.
+        present = [p for p in output.rglob("*") if p.is_file()]
+        if not present:
+            raise RuntimeError("No Kaggle failed-job artifacts retrievable: " +
+                               str(error)[:400]) from error
+        print("Kaggle output API denied; archiving already retrieved files", flush=True)
+    media = [
+        p for p in output.rglob("*") if p.is_file() and not p.is_symlink()
+        and p.name != "bridge-result-v1.json"
+    ]
+    if not media:
+        raise RuntimeError("Kaggle returned no files to salvage")
+    # Verify any checksums written by the remote renderer, but keep a
+    # failure clearly distinct from a complete/visually approved render.
+    for manifest in output.rglob("raw-output-v1.json"):
+        raw = json.loads(manifest.read_text(encoding="utf-8"))
+        parent = manifest.parent
+        for filename, key in (("video.mp4", "video_sha256"),
+                              ("last_frame.png", "last_frame_sha256")):
+            expected = raw.get(key)
+            path = parent / filename
+            if expected and (not path.is_file() or sha256(path) != expected):
+                raise RuntimeError("Failed render artifact hash mismatch: " + filename)
+    assets = [{
+        "path": path.relative_to(output).as_posix(),
+        "size_bytes": path.stat().st_size,
+        "sha256": sha256(path)
+    } for path in sorted(media)]
+    report = {
+        "version": "v1", "status": "FAILED_OR_UNVERIFIED_OUTPUTS_SALVAGED",
+        "kernel": kernel, "files": assets,
+        "video_available": any(p.name == "video.mp4" for p in media),
+        "generated_frames_available": any(p.parent.name == "generated-frames" for p in media),
+        "approved_to_chain": False, "human_review_required": True
+    }
+    write_json(output / "bridge-result-v1.json", report)
+    print(f"Preserved {len(assets)} files from {kernel}; "
+          f"video available: {report['video_available']}. NOT approved to chain.", flush=True)
+
+
 def monitor(args):
     """Observe exact Kaggle kernel until verified success, real failure, or deadline."""
     kernel = select_kernel(args)
@@ -283,18 +335,18 @@ def main():
     a = sub.add_parser("submit")
     a.add_argument("--path", required=True)
     a.add_argument("--receipt", required=True)
-    for act in ("status", "collect", "monitor"):
+    for act in ("status", "collect", "monitor", "salvage"):
         a = sub.add_parser(act)
         a.add_argument("--kaggle-username", default="")
         a.add_argument("--kernel", default="")
         a.add_argument("--source-run-id", default="")
-        if act in ("collect", "monitor"):
+        if act in ("collect", "monitor", "salvage"):
             a.add_argument("--output", required=True)
         if act == "monitor":
             a.add_argument("--timeout-seconds", type=int, default=4200)
     args = p.parse_args()
     {"prepare": prepare, "submit": submit, "status": status,
-     "collect": collect, "monitor": monitor}[args.action](args)
+     "collect": collect, "monitor": monitor, "salvage": salvage}[args.action](args)
 
 if __name__ == "__main__":
     main()
