@@ -1,4 +1,4 @@
-# Kaggle motion renderer bridge, v22. Pin earlier Kaggle CLI for read-only recovery of existing kernel.
+# Kaggle motion renderer bridge, v22. Pin earlier Kaggle CLI for read-only recovery of existing kernel. Authenticated status/output check only.
 name: Kaggle GPU Motion Renderer (v22)
 on:
   push:
