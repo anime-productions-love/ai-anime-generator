@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v3).
+"""GitHub-to-Kaggle motion rendering bridge (v4).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -77,8 +77,14 @@ def prepare(args):
         raise ValueError("Run identifier must be the originating GitHub run ID")
     if not args.prompt.strip() or len(args.prompt) > 2000:
         raise ValueError("A nonempty motion prompt up to 2000 characters is required")
-    if args.frames < 5 or args.frames > 81 or (args.frames - 1) % 4:
-        raise ValueError("frames must be 4n+1, between 5 and 81")
+    if not 5 <= args.frames <= 81:
+        raise ValueError("Requested frames must be between 5 and 81")
+    requested_frames = args.frames
+    # Wan VACE requires 4n+1 frames. Round to the closest supported count;
+    # if equidistant, prefer the next higher count to retain more motion.
+    args.frames = 5 + 4 * ((requested_frames - 5 + 2) // 4)
+    if requested_frames != args.frames:
+        print(f"Adjusted requested frame count {requested_frames} -> {args.frames} (Wan requires 4n+1)")
     if args.steps < 8 or args.steps > 50 or not 1 <= args.fps <= 30:
         raise ValueError("Steps must be 8–50, FPS 1–30")
     if args.width % 16 or args.height % 16 or not (256 <= args.width <= 832 and 256 <= args.height <= 832):
@@ -102,7 +108,8 @@ def prepare(args):
         "source_kind": "google_drive_public_link",
         "image_drive_file_id": image_id, "motion_drive_file_id": motion_id,
         "prompt": args.prompt, "negative_prompt": args.negative,
-        "frames": args.frames, "fps": args.fps,
+        "frames": args.frames, "requested_frames": requested_frames,
+        "fps": args.fps,
         "width": args.width, "height": args.height,
         "steps": args.steps, "seed": args.seed,
         "approval_status": "RENDER_REQUESTED_ONLY"
@@ -122,6 +129,8 @@ def prepare(args):
         "origin_github_run_id": args.run_id, "kernel": kernel,
         "source_kind": "google_drive_public_link",
         "image_drive_file_id": image_id, "motion_drive_file_id": motion_id,
+        "requested_frames": requested_frames,
+        "render_frames": args.frames,
         "gpu_requested": "NvidiaTeslaT4",
         "gpu_expected": "T4 x2",
         "generation_model": "Wan2.1 VACE 1.3B",
