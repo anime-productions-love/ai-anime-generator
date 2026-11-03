@@ -1,5 +1,5 @@
-# Kaggle dual-T4 motion renderer bridge, v4. Direct Google Drive media and negative prompts.
-name: Kaggle GPU Motion Renderer (v4)
+# Kaggle dual-T4 motion renderer bridge, v5. Restore Kaggle CLI six dependency.
+name: Kaggle GPU Motion Renderer (v5)
 on:
   workflow_dispatch:
     inputs:
@@ -10,9 +10,9 @@ on:
         default: submit
         required: true
       kaggle_username:
-        description: Optional Kaggle username; omitted uses authenticated account
+        description: Kaggle username for private render jobs (override if different)
         type: string
-        default: ""
+        default: "jamesnexus"
       image_drive_url:
         description: Google Drive image share URL (Anyone with link - Viewer)
         type: string
@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$KAGGLE_API_TOKEN" || { echo "::error::KAGGLE_API_TOKEN Actions secret is missing"; exit 1; }
-          python -m pip install -q --disable-pip-version-check 'kaggle>=2.2.4,<3'
+          python -m pip install -q --disable-pip-version-check 'kaggle>=2.2.4,<3' 'six>=1.16,<2'
       - name: Prepare approved GPU render
         if: inputs.operation == 'submit'
         shell: bash
