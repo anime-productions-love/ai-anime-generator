@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v6).
+"""Kaggle dual-T4 experimental motion-guided renderer (v7).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
@@ -127,8 +127,9 @@ def main():
     cards = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
     if not cards or "T4" not in cards[0]:
         raise RuntimeError("Expected Kaggle T4 accelerator; actual " + repr(cards))
-    # The pipeline uses ONE T4 with CPU offload. A second T4 is available
-    # but is NOT automatically combined into a 32 GB memory pool.
+    # Use both physically separate GPUs when present. Each device still
+    # has its own ~15 GiB memory limit; VRAM is not pooled.
+    print("CUDA GPUs available: " + repr(cards), flush=True)
     if job.get("source_kind") != "google_drive_public_link":
         raise ValueError("Unsupported input storage source")
     image_file = download_drive_source(job["image_drive_file_id"], "source-image.bin")
@@ -160,13 +161,40 @@ def main():
         vae = AutoencoderKLWan.from_pretrained(
             MODEL, subfolder="vae", torch_dtype=torch.float32
         )
-        pipe = WanVACEPipeline.from_pretrained(
-            MODEL, vae=vae, torch_dtype=torch.float16
-        )
+        if len(cards) >= 2:
+            # Move entire pipeline components onto separate T4s with ~3 GiB
+            # reserved on each device for activations and temporary tensors.
+            # Model CPU offload cannot be combined with device_map.
+            max_memory = {
+                i: f"{max(6, int(torch.cuda.get_device_properties(i).total_memory / (1024 ** 3)) - 3)}GiB"
+                for i in range(len(cards))
+            }
+            print("Memory strategy: balanced multi-GPU, budgets=" + repr(max_memory), flush=True)
+            pipe = WanVACEPipeline.from_pretrained(
+                MODEL, vae=vae, torch_dtype=torch.float16,
+                device_map="balanced", max_memory=max_memory
+            )
+            device_map = getattr(pipe, "hf_device_map", None)
+            print("Pipeline device placement: " + repr(device_map), flush=True)
+            memory_strategy = "balanced_multi_gpu"
+        else:
+            # A whole-component offload previously exhausted a T4. Layer-level
+            # CPU offloading is slower but uses substantially less VRAM.
+            print("Memory strategy: sequential CPU offload on one T4", flush=True)
+            pipe = WanVACEPipeline.from_pretrained(
+                MODEL, vae=vae, torch_dtype=torch.float16
+            )
+            pipe.enable_sequential_cpu_offload()
+            memory_strategy = "sequential_cpu_offload"
         pipe.scheduler = UniPCMultistepScheduler.from_config(
             pipe.scheduler.config, flow_shift=3.0
         )
-        pipe.enable_model_cpu_offload()
+        # Tiled VAE encode/decode limits activation peaks, particularly for
+        # video frames; smaller spatial tiles may alter tone at tile edges.
+        pipe.vae.enable_tiling(
+            tile_sample_min_height=256, tile_sample_min_width=256
+        )
+        print("Starting Wan VACE inference (25+ frames may use substantial memory)", flush=True)
         generated = pipe(
             video=control,
             mask=mask,
@@ -191,7 +219,8 @@ def main():
         result = {
             "version": "v1", "status": "RENDERED_UNREVIEWED",
             "model": MODEL, "motion_control": "experimental_edge_guidance",
-            "gpus": cards, "source_kind": "google_drive_public_link",
+            "gpus": cards, "memory_strategy": memory_strategy,
+            "source_kind": "google_drive_public_link",
             "image_drive_file_id": job["image_drive_file_id"],
             "motion_drive_file_id": job["motion_drive_file_id"],
             "image_sha256": sha256(image_file),
