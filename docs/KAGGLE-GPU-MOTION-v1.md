@@ -1,12 +1,12 @@
-# Kaggle GPU Motion Rendering Integration — v6
+# Kaggle GPU Motion Rendering Integration — v7
 
 ## Implementation status
 
 Uses the existing `anime-productions-love/ai-anime-generator` pipeline:
 
-- [Kaggle GPU Motion Renderer (v7)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
+- [Kaggle GPU Motion Renderer (v8)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
 - [Bridge v4](../scripts/kaggle_motion_bridge.py) — extracts and validates Google Drive file IDs before submitting an isolated private Kaggle notebook.
-- [GPU renderer v6](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4/animated WebP/GIF directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
+- [GPU renderer v7](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4/animated WebP/GIF directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
 - [Existing private gallery archiver v3](../scripts/archive_gallery.py) — permanently archives retrieved, checksum-verified results.
 
 **Kaggle dataset storage is NOT used.** No files are temporarily committed to public GitHub. There are no additional workflows, GitHub secrets or GPU systems.
@@ -45,6 +45,6 @@ The bridge verifies Kaggle reports completion; downloads the resulting media; re
 
 ## Limits and dependencies
 
-The current experimental renderer uses Canny edge control derived from one reference video, not true multi-view motion fusion or guaranteed pose retargeting. It uses one T4 with CPU offload, even if the selected Kaggle accelerator offers two T4 cards. Initial resolution is 512x288, 17 frames, 20 inference steps. Runtime memory usage, motion fidelity, and throughput are not verified by source installation.
+The experimental renderer uses Canny-edge control derived from one reference video, not true motion retargeting or a guarantee of matching three characters. With two CUDA T4s it now uses Diffusers balanced device placement with a reserved ~3 GiB of headroom per GPU. GPU memory is physically separate, not pooled. If only one T4 is allocated, it uses slower sequential CPU offload instead of whole-model CPU offload. A tiled VAE reduces peak encode/decode memory and can introduce tile-edge tone differences. Initial resolution remains 512x288 and 20 inference steps, while frame count follows the workflow input (17 frames by default). The change responds to a real 25-frame CUDA OOM at ~14.3 GiB allocated on GPU 0; it has not yet been validated by a successful Kaggle render.
 
-The existing GitHub Actions secrets `KAGGLE_API_TOKEN` (Kaggle CLI) and `VIDEO_REPO_TOKEN` (private gallery write access) remain required. Neither secret is transferred to Kaggle. The Drive URLs identify shared source files, not credentials. This revision has not triggered a Kaggle render or any tests. The negative prompt form input is wired to the existing bridge `--negative` argument. Custom negatives add to the renderer's built-in safeguards.
+The existing GitHub Actions secrets `KAGGLE_API_TOKEN` (Kaggle CLI) and `VIDEO_REPO_TOKEN` (private gallery write access) remain required. Neither secret is transferred to Kaggle. The Drive URLs identify shared source files, not credentials. This revision has not triggered another Kaggle render or any tests. Verify the actual available CUDA devices and printed pipeline device placement in Kaggle logs to confirm the chosen memory strategy. The negative prompt form input is wired to the existing bridge `--negative` argument. Custom negatives add to the renderer's built-in safeguards.
