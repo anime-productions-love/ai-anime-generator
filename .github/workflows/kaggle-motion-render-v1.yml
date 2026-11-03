@@ -1,5 +1,5 @@
-# Kaggle dual-T4 motion renderer bridge, v2. Manual submit/retrieve only.
-name: Kaggle GPU Motion Renderer (v2)
+# Kaggle dual-T4 motion renderer bridge, v3. Direct Google Drive media, no Kaggle datasets.
+name: Kaggle GPU Motion Renderer (v3)
 on:
   workflow_dispatch:
     inputs:
@@ -13,16 +13,12 @@ on:
         description: Optional Kaggle username; omitted uses authenticated account
         type: string
         default: ""
-      dataset_source:
-        description: Private Kaggle dataset owner/slug holding image and motion video
+      image_drive_url:
+        description: Google Drive image share URL (Anyone with link - Viewer)
         type: string
         default: ""
-      image_file:
-        description: Character image filename at dataset root
-        type: string
-        default: ""
-      motion_file:
-        description: Motion reference video filename at dataset root
+      motion_drive_url:
+        description: Google Drive motion MP4 share URL (Anyone with link - Viewer)
         type: string
         default: ""
       prompt:
@@ -59,9 +55,8 @@ jobs:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
       KG_USER: ${{ inputs.kaggle_username }}
-      KG_DATASET: ${{ inputs.dataset_source }}
-      KG_IMAGE: ${{ inputs.image_file }}
-      KG_MOTION: ${{ inputs.motion_file }}
+      KG_IMAGE_DRIVE: ${{ inputs.image_drive_url }}
+      KG_MOTION_DRIVE: ${{ inputs.motion_drive_url }}
       KG_PROMPT: ${{ inputs.prompt }}
       KG_FRAMES: ${{ inputs.frames }}
       KG_FPS: ${{ inputs.fps }}
@@ -87,8 +82,8 @@ jobs:
           set -euo pipefail
           python3 scripts/kaggle_motion_bridge.py prepare \
             --kaggle-username "$KG_USER" --run-id "$GITHUB_RUN_ID" \
-            --dataset "$KG_DATASET" --image "$KG_IMAGE" \
-            --motion "$KG_MOTION" --prompt "$KG_PROMPT" \
+            --image-drive "$KG_IMAGE_DRIVE" --motion-drive "$KG_MOTION_DRIVE" \
+            --prompt "$KG_PROMPT" \
             --frames "$KG_FRAMES" --fps "$KG_FPS" \
             --path "$RUNNER_TEMP/kaggle-stage" \
             --receipt "$RUNNER_TEMP/kaggle-receipt-v1.json"
