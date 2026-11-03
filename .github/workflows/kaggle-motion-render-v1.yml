@@ -1,0 +1,143 @@
+# Kaggle dual-T4 motion renderer bridge, v1. Manual submit/retrieve only.
+name: Kaggle GPU Motion Renderer (v1)
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Submit a new Kaggle render or retrieve an existing one
+        type: choice
+        options: [submit, retrieve]
+        default: submit
+        required: true
+      kaggle_username:
+        description: Optional Kaggle username; omitted uses authenticated account
+        type: string
+        default: ""
+      dataset_source:
+        description: Private Kaggle dataset owner/slug holding image and motion video
+        type: string
+        default: ""
+      image_file:
+        description: Character image filename at dataset root
+        type: string
+        default: ""
+      motion_file:
+        description: Motion reference video filename at dataset root
+        type: string
+        default: ""
+      prompt:
+        description: Non-confidential animation instructions (public workflow input)
+        type: string
+        default: ""
+      frames:
+        description: Frames (4n+1, from 5 to 81)
+        type: number
+        default: 17
+      fps:
+        description: Playback FPS
+        type: number
+        default: 8
+      source_run_id:
+        description: Original GitHub run ID for retrieval
+        type: string
+        default: ""
+      kernel:
+        description: Optional exact Kaggle owner/kernel-slug for retrieval
+        type: string
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: kaggle-motion-\${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  kaggle-bridge:
+    name: Kaggle \${{ inputs.operation }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      KAGGLE_API_TOKEN: \${{ secrets.KAGGLE_API_TOKEN }}
+      VIDEO_REPO_TOKEN: \${{ secrets.VIDEO_REPO_TOKEN }}
+      KG_USER: \${{ inputs.kaggle_username }}
+      KG_DATASET: \${{ inputs.dataset_source }}
+      KG_IMAGE: \${{ inputs.image_file }}
+      KG_MOTION: \${{ inputs.motion_file }}
+      KG_PROMPT: \${{ inputs.prompt }}
+      KG_FRAMES: \${{ inputs.frames }}
+      KG_FPS: \${{ inputs.fps }}
+      KG_SOURCE_RUN: \${{ inputs.source_run_id }}
+      KG_KERNEL: \${{ inputs.kernel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install authenticated Kaggle CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KAGGLE_API_TOKEN" || { echo "::error::KAGGLE_API_TOKEN Actions secret is missing"; exit 1; }
+          python -m pip install -q --disable-pip-version-check 'kaggle>=2.2.4,<3'
+      - name: Prepare approved GPU render
+        if: inputs.operation == 'submit'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kaggle_motion_bridge.py prepare \
+            --kaggle-username "$KG_USER" --run-id "$GITHUB_RUN_ID" \
+            --dataset "$KG_DATASET" --image "$KG_IMAGE" \
+            --motion "$KG_MOTION" --prompt "$KG_PROMPT" \
+            --frames "$KG_FRAMES" --fps "$KG_FPS" \
+            --path "$RUNNER_TEMP/kaggle-stage" \
+            --receipt "$RUNNER_TEMP/kaggle-receipt-v1.json"
+      - name: Submit private dual-T4 Kaggle job
+        if: inputs.operation == 'submit'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kaggle_motion_bridge.py submit \
+            --path "$RUNNER_TEMP/kaggle-stage" \
+            --receipt "$RUNNER_TEMP/kaggle-receipt-v1.json"
+          python3 - "$RUNNER_TEMP/kaggle-receipt-v1.json" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1],encoding="utf8"))
+          with open(sys.argv[2],"a",encoding="utf8") as f:
+              f.write("## Kaggle submitted\n\nKernel: "+r["kernel"]+"\n\n")
+              f.write("Submission is not a completed render. Retrieve after Kaggle finishes using this run ID.\n")
+          PY
+      - name: Preserve submission identity
+        if: inputs.operation == 'submit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-motion-submission-v1-\${{ github.run_id }}
+          path: \${{ runner.temp }}/kaggle-receipt-v1.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Collect and verify actual Kaggle video
+        if: inputs.operation == 'retrieve'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/kaggle_motion_bridge.py collect \
+            --kaggle-username "$KG_USER" \
+            --source-run-id "$KG_SOURCE_RUN" --kernel "$KG_KERNEL" \
+            --output "$RUNNER_TEMP/kaggle-result"
+          echo "Downloaded Kaggle video and SHA-verified it. Human review still required." >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve unapproved output artifact
+        if: inputs.operation == 'retrieve'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-motion-unreviewed-v1-\${{ github.run_id }}
+          path: \${{ runner.temp }}/kaggle-result
+          if-no-files-found: error
+          retention-days: 30
+      - name: Permanently archive verified output in existing gallery
+        if: inputs.operation == 'retrieve'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind kaggle \
+            --source "$RUNNER_TEMP/kaggle-result"
