@@ -1,6 +1,10 @@
-# Kaggle dual-T4 motion renderer bridge, v8. Balanced GPU memory and low-VRAM fallback.
-name: Kaggle GPU Motion Renderer (v8)
+# Kaggle motion renderer bridge, v9. File-triggered retries with safe sequential offloading.
+name: Kaggle GPU Motion Renderer (v9)
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'kaggle/renderer/render.py'
   workflow_dispatch:
     inputs:
       operation:
@@ -52,19 +56,19 @@ concurrency:
   cancel-in-progress: false
 jobs:
   kaggle-bridge:
-    name: Kaggle ${{ inputs.operation }}
+    name: Kaggle ${{ inputs.operation || 'submit' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
-      KG_USER: ${{ inputs.kaggle_username }}
-      KG_IMAGE_DRIVE: ${{ inputs.image_drive_url }}
-      KG_MOTION_DRIVE: ${{ inputs.motion_drive_url }}
-      KG_PROMPT: ${{ inputs.prompt }}
-      KG_NEGATIVE: ${{ inputs.negative_prompt }}
-      KG_FRAMES: ${{ inputs.frames }}
-      KG_FPS: ${{ inputs.fps }}
+      KG_USER: ${{ inputs.kaggle_username || 'jamesnexus' }}
+      KG_IMAGE_DRIVE: ${{ inputs.image_drive_url || 'https://drive.google.com/file/d/1koBX9M-8FpO10dX2H1OPdL0TY8myu-Sw/view' }}
+      KG_MOTION_DRIVE: ${{ inputs.motion_drive_url || 'https://drive.google.com/file/d/1o4z06n0zJ2Mclj_imu1WzLoeW0XE9kvU/view' }}
+      KG_PROMPT: ${{ inputs.prompt || 'Animate all three characters following the motion reference as closely as possible. Preserve each character’s unique identity, facial features, hairstyle, clothing, colors, and original anime art style. Maintain their relative positions, proportions, and spatial relationships. Keep the original image framing and crop fixed. If any body parts are currently out of frame or cropped out, keep them out of frame and do not reveal or invent hidden body parts. Preserve the existing composition exactly while animating only the visible portions of the characters. Ensure natural, synchronized movement and consistent anatomy throughout the animation.' }}
+      KG_NEGATIVE: ${{ inputs.negative_prompt || 'Reframing, camera movement, panning, zooming, crop changes, revealing off-screen body parts, inventing hidden anatomy, bringing cropped arms, legs, heads, hands, or other missing parts into view, merged characters, fused bodies, swapped faces, identity mixing, overlapping anatomy, duplicated characters, disappearing characters, extra limbs, missing limbs, detached limbs, distorted faces, inconsistent clothing, unnatural motion, incorrect movement, flickering, jitter, perspective changes, transformations, gore, dismemberment.' }}
+      KG_FRAMES: ${{ inputs.frames || 25 }}
+      KG_FPS: ${{ inputs.fps || 8 }}
       KG_SOURCE_RUN: ${{ inputs.source_run_id }}
       KG_KERNEL: ${{ inputs.kernel }}
     steps:
@@ -81,7 +85,7 @@ jobs:
           test -n "$KAGGLE_API_TOKEN" || { echo "::error::KAGGLE_API_TOKEN Actions secret is missing"; exit 1; }
           python -m pip install -q --disable-pip-version-check 'kaggle>=2.2.4,<3' 'six>=1.16,<2'
       - name: Prepare approved GPU render
-        if: inputs.operation == 'submit'
+        if: github.event_name == 'push' || inputs.operation == 'submit'
         shell: bash
         run: |
           set -euo pipefail
@@ -93,7 +97,7 @@ jobs:
             --path "$RUNNER_TEMP/kaggle-stage" \
             --receipt "$RUNNER_TEMP/kaggle-receipt-v1.json"
       - name: Submit private dual-T4 Kaggle job
-        if: inputs.operation == 'submit'
+        if: github.event_name == 'push' || inputs.operation == 'submit'
         shell: bash
         run: |
           set -euo pipefail
@@ -108,7 +112,7 @@ jobs:
               f.write("Submission is not a completed render. Retrieve after Kaggle finishes using this run ID.\n")
           PY
       - name: Preserve submission identity
-        if: inputs.operation == 'submit'
+        if: github.event_name == 'push' || inputs.operation == 'submit'
         uses: actions/upload-artifact@v4
         with:
           name: kaggle-motion-submission-v1-${{ github.run_id }}
