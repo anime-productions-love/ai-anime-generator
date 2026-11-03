@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v4).
+"""Kaggle dual-T4 experimental motion-guided renderer (v5).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and motion MP4s are downloaded from link-viewable Google Drive files.
@@ -118,6 +118,9 @@ def main():
         raise ValueError("Out-of-bounds Wan VACE inference settings")
     if len(job["prompt"]) > 2000 or not job["prompt"].strip():
         raise ValueError("Empty or overly long prompt")
+    custom_negative = job.get("negative_prompt") or ""
+    if not isinstance(custom_negative, str) or len(custom_negative) > 2000:
+        raise ValueError("Invalid or overly long negative prompt")
 
     image = ImageOps.fit(Image.open(image_file).convert("RGB"), (width, height))
     control = frames_from_reference(motion_file, frames, width, height)
@@ -144,7 +147,7 @@ def main():
             mask=mask,
             reference_images=[image],
             prompt=job["prompt"],
-            negative_prompt=job.get("negative_prompt") or FAIL_NEGATIVE,
+            negative_prompt=FAIL_NEGATIVE + (", " + custom_negative.strip() if custom_negative.strip() else ""),
             height=height, width=width, num_frames=frames,
             num_inference_steps=steps, guidance_scale=5.0,
             generator=torch.Generator(device="cpu").manual_seed(int(job["seed"])),
