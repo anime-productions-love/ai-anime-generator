@@ -1,4 +1,4 @@
-# Kaggle motion renderer bridge, v20. Safely identify API credential expiry without revealing secrets.
+# Kaggle motion renderer bridge, v20. Safely identify API credential expiry without revealing secrets. Read-only authentication recovery for existing Kaggle notebook.
 name: Kaggle GPU Motion Renderer (v20)
 on:
   push:
