@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v1).
+"""Kaggle dual-T4 experimental motion-guided renderer (v2).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Input files live in a Kaggle dataset, not inside a public GitHub workflow input.
@@ -16,6 +16,7 @@ import time
 OUT = Path("/kaggle/working/anime-render")
 IN = Path("/kaggle/input")
 MODEL = "Wan-AI/Wan2.1-VACE-1.3B-diffusers"
+EMBEDDED_JOB_JSON = None  # Filled by the GitHub submit bridge
 FAIL_NEGATIVE = (
     "body horror, gore, dismemberment, torn skin, separated limbs, fused bodies, "
     "extra arms, extra legs, deformed hands, uncanny faces, distorted anatomy, "
@@ -67,6 +68,16 @@ def frames_from_reference(video, count, width, height):
     return samples
 
 def main():
+    # Notebook code itself carries the approved JSON so Kaggle CLI upload
+    # need not preserve arbitrary sidecar files when pushing a kernel.
+    try:
+        import diffusers
+    except ImportError:
+        subprocess.run([
+            sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+            "-q", "diffusers==0.35.2", "transformers==4.57.1",
+            "accelerate==1.11.0", "ftfy", "sentencepiece"
+        ], check=True)
     import torch
     import cv2
     from PIL import Image, ImageOps
@@ -74,7 +85,8 @@ def main():
     from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
     from diffusers.utils import export_to_video
     OUT.mkdir(parents=True, exist_ok=True)
-    job = json.loads(Path(__file__).with_name("job-v1.json").read_text(encoding="utf-8"))
+    job = json.loads(EMBEDDED_JOB_JSON) if EMBEDDED_JOB_JSON is not None else json.loads(\
+        Path(__file__).with_name("job-v1.json").read_text(encoding="utf-8"))
     if job.get("version") != "v1" or job.get("model") != "vace-1.3b":
         raise ValueError("Unsupported source-bound Kaggle job")
     if not torch.cuda.is_available():
