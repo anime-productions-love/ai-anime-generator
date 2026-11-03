@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v6).
+"""GitHub-to-Kaggle motion rendering bridge (v7).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -164,10 +164,19 @@ def status(args):
     print(cmd("kernels", "status", kernel))
     print("Kaggle kernel: " + kernel)
 
-def collect(args):
+def collect(args, allow_status_denied=False):
     kernel = select_kernel(args)
-    status_text = cmd("kernels", "status", kernel)
-    print("Kaggle reported: " + status_text[:1200])
+    try:
+        status_text = cmd("kernels", "status", kernel)
+    except RuntimeError as exc:
+        if not allow_status_denied or "kernels.get" not in str(exc):
+            raise
+        # A private kernel can become temporarily unreadable via status API.
+        # Never infer completion: require actual retrievable output + hashes.
+        status_text = ""
+        print("Kaggle status access denied; requiring actual complete render output", flush=True)
+    if status_text:
+        print("Kaggle reported: " + status_text[:1200])
     if re.search(r"\b(error|failed|cancelled|canceled)\b", status_text, flags=re.I):
         raise RuntimeError("Kaggle render failed; inspect Kaggle notebook execution logs")
     if re.search(r"\b(pending|queued|running|in progress)\b", status_text, flags=re.I):
@@ -204,7 +213,33 @@ def monitor(args):
     deadline = time.monotonic() + args.timeout_seconds
     previous = None
     while True:
-        status_text = cmd("kernels", "status", kernel)
+        try:
+            status_text = cmd("kernels", "status", kernel)
+        except RuntimeError as exc:
+            if "kernels.get" not in str(exc):
+                raise
+            # Kaggle intermittently returns HTTP 403 even for the same private
+            # kernel that was previously RUNNING and successfully authenticated.
+            # Try verified output retrieval without resubmitting GPU work.
+            status_text = "STATUS_ACCESS_DENIED"
+            if status_text != previous:
+                print("Kaggle status became inaccessible; retrying verified output retrieval", flush=True)
+                previous = status_text
+            try:
+                collect(args, allow_status_denied=True)
+                return
+            except RuntimeError as output_exc:
+                detail = str(output_exc)
+                retryable = ("kernels output failed" in detail or
+                             "Kaggle output missing one exact" in detail or
+                             "Kaggle render is still pending" in detail)
+                if not retryable:
+                    raise
+                print("Output not yet retrievable: " + detail[:500], flush=True)
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Kaggle status denied and verified output unavailable until monitor deadline")
+            time.sleep(min(60, max(1, deadline - time.monotonic())))
+            continue
         if status_text != previous:
             print("Remote Kaggle status: " + status_text[:1000], flush=True)
             previous = status_text
