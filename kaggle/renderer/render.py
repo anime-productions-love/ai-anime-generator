@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle dual-T4 experimental motion-guided renderer (v7).
+"""Kaggle T4 motion-guided renderer (v8).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
@@ -13,6 +13,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import traceback
 
 OUT = Path("/kaggle/working/anime-render")
 MODEL = "Wan-AI/Wan2.1-VACE-1.3B-diffusers"
@@ -127,8 +128,9 @@ def main():
     cards = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
     if not cards or "T4" not in cards[0]:
         raise RuntimeError("Expected Kaggle T4 accelerator; actual " + repr(cards))
-    # Use both physically separate GPUs when present. Each device still
-    # has its own ~15 GiB memory limit; VRAM is not pooled.
+    # CUDA placement is managed by Accelerate sequential offload; model
+    # components are not split across GPUs because Wan VACE prepares VAE
+    # inputs on its execution device and balanced placement caused a mismatch.
     print("CUDA GPUs available: " + repr(cards), flush=True)
     if job.get("source_kind") != "google_drive_public_link":
         raise ValueError("Unsupported input storage source")
@@ -158,42 +160,33 @@ def main():
     pipe = None
     started = time.time()
     try:
+        # The pinned VACE pipeline runs VAE.encode() on tensors located on
+        # its execution device. "balanced" placement with an external VAE
+        # left the VAE weights on CPU while its inputs were on CUDA. Use
+        # Accelerate's submodule-level sequential offload instead, so
+        # weights move to CUDA as their forward hooks execute.
         vae = AutoencoderKLWan.from_pretrained(
             MODEL, subfolder="vae", torch_dtype=torch.float32
         )
-        if len(cards) >= 2:
-            # Move entire pipeline components onto separate T4s with ~3 GiB
-            # reserved on each device for activations and temporary tensors.
-            # Model CPU offload cannot be combined with device_map.
-            max_memory = {
-                i: f"{max(6, int(torch.cuda.get_device_properties(i).total_memory / (1024 ** 3)) - 3)}GiB"
-                for i in range(len(cards))
-            }
-            print("Memory strategy: balanced multi-GPU, budgets=" + repr(max_memory), flush=True)
-            pipe = WanVACEPipeline.from_pretrained(
-                MODEL, vae=vae, torch_dtype=torch.float16,
-                device_map="balanced", max_memory=max_memory
-            )
-            device_map = getattr(pipe, "hf_device_map", None)
-            print("Pipeline device placement: " + repr(device_map), flush=True)
-            memory_strategy = "balanced_multi_gpu"
-        else:
-            # A whole-component offload previously exhausted a T4. Layer-level
-            # CPU offloading is slower but uses substantially less VRAM.
-            print("Memory strategy: sequential CPU offload on one T4", flush=True)
-            pipe = WanVACEPipeline.from_pretrained(
-                MODEL, vae=vae, torch_dtype=torch.float16
-            )
-            pipe.enable_sequential_cpu_offload()
-            memory_strategy = "sequential_cpu_offload"
+        pipe = WanVACEPipeline.from_pretrained(
+            MODEL, vae=vae, torch_dtype=torch.float16,
+            low_cpu_mem_usage=True
+        )
         pipe.scheduler = UniPCMultistepScheduler.from_config(
             pipe.scheduler.config, flow_shift=3.0
         )
-        # Tiled VAE encode/decode limits activation peaks, particularly for
-        # video frames; smaller spatial tiles may alter tone at tile edges.
         pipe.vae.enable_tiling(
             tile_sample_min_height=256, tile_sample_min_width=256
         )
+        pipe.enable_sequential_cpu_offload(gpu_id=0)
+        memory_strategy = "sequential_cpu_offload"
+        print(
+            "Memory strategy: sequential CPU offload on cuda:0; "
+            "VAE dtype=" + str(pipe.vae.dtype) +
+            "; execution device=" + str(pipe._execution_device),
+            flush=True
+        )
+        torch.cuda.empty_cache()
         print("Starting Wan VACE inference (25+ frames may use substantial memory)", flush=True)
         generated = pipe(
             video=control,
@@ -245,6 +238,7 @@ if __name__ == "__main__":
     except Exception as exc:
         OUT.mkdir(parents=True, exist_ok=True)
         (OUT / "failure-v1.json").write_text(json.dumps({
-            "version": "v1", "status": "RENDER_FAILED", "reason": str(exc)
+            "version": "v1", "status": "RENDER_FAILED", "reason": str(exc),
+            "traceback": traceback.format_exc()[-12000:]
         }, indent=2) + "\n", encoding="utf-8")
         raise
