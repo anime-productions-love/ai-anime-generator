@@ -1,10 +1,11 @@
-# Kaggle motion renderer bridge, v12. Retry exact private kernel without resubmission.
-name: Kaggle GPU Motion Renderer (v12)
+# Kaggle motion renderer bridge, v13. Include bridge fixes in existing monitor trigger.
+name: Kaggle GPU Motion Renderer (v13)
 on:
   push:
     branches: [main]
     paths:
       - 'kaggle/renderer/render.py'
+      - 'scripts/kaggle_motion_bridge.py'
       - '.github/workflows/kaggle-motion-render-v1.yml'
   workflow_dispatch:
     inputs:
