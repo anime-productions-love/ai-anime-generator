@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-to-Kaggle motion rendering bridge (v9).
+"""GitHub-to-Kaggle motion rendering bridge (v10).
 
 Submit a PRIVATE single-render kernel via Kaggle's official CLI or collect
 results from a precisely identified kernel. No implicit generation or tests.
@@ -78,33 +78,40 @@ def prepare(args):
         raise ValueError("Run identifier must be the originating GitHub run ID")
     if not args.prompt.strip() or len(args.prompt) > 2000:
         raise ValueError("A nonempty motion prompt up to 2000 characters is required")
+    if args.engine not in ("vace-1.3b", "scail2-q6k"):
+        raise ValueError("Unsupported Kaggle rendering engine")
     if not 5 <= args.frames <= 81:
         raise ValueError("Requested frames must be between 5 and 81")
     requested_frames = args.frames
-    # Wan VACE requires 4n+1 frames. Round to the closest supported count;
-    # if equidistant, prefer the next higher count to retain more motion.
-    args.frames = 5 + 4 * ((requested_frames - 5 + 2) // 4)
-    if requested_frames != args.frames:
-        print(f"Adjusted requested frame count {requested_frames} -> {args.frames} (Wan requires 4n+1)")
-    if args.steps < 8 or args.steps > 50 or not 1 <= args.fps <= 30:
-        raise ValueError("Steps must be 8–50, FPS 1–30")
+    if args.engine == "vace-1.3b":
+        # Existing VACE inference contract remains unchanged.
+        args.frames = 5 + 4 * ((requested_frames - 5 + 2) // 4)
+    if args.steps < (4 if args.engine == "scail2-q6k" else 8) or args.steps > 50 or not 1 <= args.fps <= 30:
+        raise ValueError("Invalid engine-specific steps or FPS")
+    if not 1 <= args.duration_seconds <= 5:
+        raise ValueError("First SCAIL-2 clip must be 1–5 seconds")
     if args.width % 16 or args.height % 16 or not (256 <= args.width <= 832 and 256 <= args.height <= 832):
         raise ValueError("Width/height must be 256–832 multiples of 16")
     kernel = f"{username}/{KERNEL_SLUG}-{args.run_id}"
     folder = Path(args.path)
     folder.mkdir(parents=True, exist_ok=True)
-    source_renderer = Path(__file__).resolve().parents[1] / "kaggle/renderer/render.py"
+    render_file = "scail2.py" if args.engine == "scail2-q6k" else "render.py"
+    source_renderer = Path(__file__).resolve().parents[1] / "kaggle/renderer" / render_file
+    # Optional privately uploaded model datasets, reusable across Kaggle runs.
+    datasets = [part.strip() for part in args.kaggle_datasets.split(";") if part.strip()]
+    if any(not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", item) for item in datasets):
+        raise ValueError("Kaggle dataset sources must be semicolon-separated owner/slug identifiers")
     write_json(folder / "kernel-metadata.json", {
         "id": kernel,
         "title": f"Anime Motion Render {args.run_id}",
-        "code_file": "render.py", "language": "python", "kernel_type": "script",
+        "code_file": render_file, "language": "python", "kernel_type": "script",
         "is_private": True, "enable_gpu": True, "enable_internet": True,
         "machine_shape": "NvidiaTeslaT4",
-        "dataset_sources": [],
+        "dataset_sources": datasets,
         "competition_sources": [], "kernel_sources": [], "model_sources": [],
     })
     write_json(folder / "job-v1.json", {
-        "version": "v1", "model": "vace-1.3b",
+        "version": "v1", "model": args.engine,
         "source_github_run_id": args.run_id,
         "source_kind": "google_drive_public_link",
         "image_drive_file_id": image_id, "motion_drive_file_id": motion_id,
@@ -113,6 +120,7 @@ def prepare(args):
         "fps": args.fps,
         "width": args.width, "height": args.height,
         "steps": args.steps, "seed": args.seed,
+        "duration_seconds": args.duration_seconds if args.engine == "scail2-q6k" else None,
         "approval_status": "RENDER_REQUESTED_ONLY"
     })
     # Kaggle's push API treats code_file as its authoritative script;
@@ -124,7 +132,7 @@ def prepare(args):
         raise ValueError("Renderer job-injection marker missing or ambiguous")
     job_json = (folder / "job-v1.json").read_text(encoding="utf-8")
     script = script.replace(token, "EMBEDDED_JOB_JSON = " + repr(job_json))
-    (folder / "render.py").write_text(script, encoding="utf-8")
+    (folder / render_file).write_text(script, encoding="utf-8")
     receipt = {
         "version": "v1", "status": "PREPARED_NOT_SUBMITTED",
         "origin_github_run_id": args.run_id, "kernel": kernel,
@@ -134,7 +142,9 @@ def prepare(args):
         "render_frames": args.frames,
         "gpu_requested": "NvidiaTeslaT4",
         "gpu_expected": "T4 x2",
-        "generation_model": "Wan2.1 VACE 1.3B",
+        "generation_model": ("SCAIL-2 Q6_K" if args.engine == "scail2-q6k"
+                             else "Wan2.1 VACE 1.3B"),
+        "dataset_sources": datasets,
         "human_review_required": True,
     }
     write_json(args.receipt, receipt)
@@ -319,6 +329,9 @@ def main():
     sub = p.add_subparsers(dest="action", required=True)
     a = sub.add_parser("prepare")
     a.add_argument("--kaggle-username", default="")
+    a.add_argument("--engine", choices=("vace-1.3b", "scail2-q6k"), default="vace-1.3b")
+    a.add_argument("--kaggle-datasets", default="")
+    a.add_argument("--duration-seconds", type=int, default=2)
     a.add_argument("--run-id", required=True)
     a.add_argument("--image-drive", required=True)
     a.add_argument("--motion-drive", required=True)
