@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v13. Include bridge fixes in existing monitor trigger.
-name: Kaggle GPU Motion Renderer (v13)
+# Kaggle motion renderer bridge, v14. Fresh authorized GPU submission via existing file trigger.
+name: Kaggle GPU Motion Renderer (v14)
 on:
   push:
     branches: [main]
