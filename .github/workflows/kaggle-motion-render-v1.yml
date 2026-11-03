@@ -1,10 +1,11 @@
-# Kaggle motion renderer bridge, v9. File-triggered retries with safe sequential offloading.
-name: Kaggle GPU Motion Renderer (v9)
+# Kaggle motion renderer bridge, v10. Monitor and retrieve real Kaggle render results.
+name: Kaggle GPU Motion Renderer (v10)
 on:
   push:
     branches: [main]
     paths:
       - 'kaggle/renderer/render.py'
+      - '.github/workflows/kaggle-motion-render-v1.yml'
   workflow_dispatch:
     inputs:
       operation:
@@ -56,6 +57,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   kaggle-bridge:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[kaggle-retry]') || contains(github.event.head_commit.message, '[kaggle-monitor]')
     name: Kaggle ${{ inputs.operation || 'submit' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -71,6 +73,7 @@ jobs:
       KG_FPS: ${{ inputs.fps || 8 }}
       KG_SOURCE_RUN: ${{ inputs.source_run_id }}
       KG_KERNEL: ${{ inputs.kernel }}
+      MONITOR_PRIOR: ${{ contains(github.event.head_commit.message, '[kaggle-monitor]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,7 +88,7 @@ jobs:
           test -n "$KAGGLE_API_TOKEN" || { echo "::error::KAGGLE_API_TOKEN Actions secret is missing"; exit 1; }
           python -m pip install -q --disable-pip-version-check 'kaggle>=2.2.4,<3' 'six>=1.16,<2'
       - name: Prepare approved GPU render
-        if: github.event_name == 'push' || inputs.operation == 'submit'
+        if: inputs.operation == 'submit' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[kaggle-retry]'))
         shell: bash
         run: |
           set -euo pipefail
@@ -97,7 +100,7 @@ jobs:
             --path "$RUNNER_TEMP/kaggle-stage" \
             --receipt "$RUNNER_TEMP/kaggle-receipt-v1.json"
       - name: Submit private dual-T4 Kaggle job
-        if: github.event_name == 'push' || inputs.operation == 'submit'
+        if: inputs.operation == 'submit' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[kaggle-retry]'))
         shell: bash
         run: |
           set -euo pipefail
@@ -112,13 +115,30 @@ jobs:
               f.write("Submission is not a completed render. Retrieve after Kaggle finishes using this run ID.\n")
           PY
       - name: Preserve submission identity
-        if: github.event_name == 'push' || inputs.operation == 'submit'
+        if: inputs.operation == 'submit' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[kaggle-retry]'))
         uses: actions/upload-artifact@v4
         with:
           name: kaggle-motion-submission-v1-${{ github.run_id }}
           path: ${{ runner.temp }}/kaggle-receipt-v1.json
           if-no-files-found: error
           retention-days: 30
+      - name: Monitor Kaggle to verified output and archive
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$MONITOR_PRIOR" = "true" ]; then
+            source_id="41585877699"
+          else
+            source_id="$GITHUB_RUN_ID"
+          fi
+          python3 scripts/kaggle_motion_bridge.py monitor \
+            --kaggle-username "$KG_USER" --source-run-id "$source_id" \
+            --output "$RUNNER_TEMP/kaggle-result" --timeout-seconds 4200
+          echo "Kaggle returned validated render assets for $source_id" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/archive_gallery.py \
+            --run-id "$GITHUB_RUN_ID" --kind kaggle \
+            --source "$RUNNER_TEMP/kaggle-result"
       - name: Collect and verify actual Kaggle video
         if: inputs.operation == 'retrieve'
         shell: bash
