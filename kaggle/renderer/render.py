@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle T4 motion-guided renderer (v8).
+"""Kaggle T4 motion-guided renderer (v9).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
@@ -153,8 +153,11 @@ def main():
     image = ImageOps.fit(Image.open(image_file).convert("RGB"), (width, height))
     control = frames_from_reference(motion_file, frames, width, height)
     control[0] = image  # exact first-frame guidance
-    mask = [Image.new("L", (width, height), 0)]
-    mask.extend(Image.new("L", (width, height), 255) for _ in range(frames - 1))
+    # VACE interprets BLACK mask regions as control/conditioning; white
+    # regions request unconstrained generation. Previously every motion edge
+    # frame had a white mask, so its guidance was thrown away. For C2V keep
+    # the first-frame image and every following edge map as conditioning.
+    mask = [Image.new("L", (width, height), 0) for _ in range(frames)]
     control[0].save(OUT / "source-image.png")
     control[1].save(OUT / "control-edge-preview.png")
     pipe = None
@@ -169,7 +172,7 @@ def main():
             MODEL, subfolder="vae", torch_dtype=torch.float32
         )
         pipe = WanVACEPipeline.from_pretrained(
-            MODEL, vae=vae, torch_dtype=torch.float16,
+            MODEL, vae=vae, torch_dtype=torch.float32,
             low_cpu_mem_usage=True
         )
         pipe.scheduler = UniPCMultistepScheduler.from_config(
@@ -188,6 +191,15 @@ def main():
         )
         torch.cuda.empty_cache()
         print("Starting Wan VACE inference (25+ frames may use substantial memory)", flush=True)
+
+        def reject_invalid_latents(_pipeline, step, _timestep, callback_kwargs):
+            # FP16 on T4 can silently overflow; run the full VACE model in
+            # FP32 and still reject any non-finite denoising state.
+            latents = callback_kwargs["latents"]
+            if not bool(torch.isfinite(latents).all().item()):
+                raise RuntimeError(f"Invalid non-finite denoising latents at step {step}")
+            return callback_kwargs
+
         generated = pipe(
             video=control,
             mask=mask,
@@ -197,7 +209,22 @@ def main():
             height=height, width=width, num_frames=frames,
             num_inference_steps=steps, guidance_scale=5.0,
             generator=torch.Generator(device="cpu").manual_seed(int(job["seed"])),
+            callback_on_step_end=reject_invalid_latents,
+            callback_on_step_end_tensor_inputs=["latents"],
         ).frames[0]
+        # Detect the previously observed collapse into black frames before
+        # calling an encode, checksum, or gallery archive a successful render.
+        from PIL import ImageStat
+        frame_luma = [round(ImageStat.Stat(f.convert("L").resize((64, 64))).mean[0], 2)
+                      for f in generated]
+        input_luma = float(ImageStat.Stat(image.convert("L").resize((64, 64))).mean[0])
+        cutoff = max(12.0, input_luma * 0.22)
+        collapsed_count = sum(v < cutoff for v in frame_luma)
+        print("Frame luminance: input=%.2f cutoff=%.2f frames=%s" %
+              (input_luma, cutoff, frame_luma), flush=True)
+        if input_luma >= 45 and collapsed_count >= max(3, len(frame_luma) // 3):
+            raise RuntimeError("Rendered frame brightness collapsed compared to source image; "
+                               f"{collapsed_count}/{len(frame_luma)} frames below {cutoff:.1f}")
         target = OUT / "video.mp4"
         export_to_video(generated, str(target), fps=fps)
         if not target.is_file() or target.stat().st_size < 1000:
@@ -221,6 +248,9 @@ def main():
             "video_sha256": sha256(target),
             "last_frame_sha256": sha256(OUT / "last_frame.png"),
             "frames": frames, "fps": fps, "steps": steps, "seed": int(job["seed"]),
+            "renderer_version": "v9", "control_mask": "black_all_frames",
+            "model_dtype": "float32", "input_luma": round(input_luma, 2),
+            "frame_luma": frame_luma,
             "duration_seconds": round(time.time() - started, 2),
             "requires_human_approval_before_chaining": True
         }
