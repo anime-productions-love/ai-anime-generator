@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kaggle T4 motion-guided renderer (v11).
+"""Kaggle T4 motion-guided renderer (v12).
 
 One PRIVATE Kaggle notebook run processes ONE source image + ONE driving clip.
 Images and MP4/animated WebP/GIF references are downloaded from link-viewable Google Drive files.
@@ -155,11 +155,11 @@ def main():
     image = ImageOps.fit(Image.open(image_file).convert("RGB"), (width, height))
     control = frames_from_reference(motion_file, frames, width, height)
     control[0] = image  # exact first-frame guidance
-    # VACE interprets BLACK mask regions as control/conditioning; white
-    # regions request unconstrained generation. Previously every motion edge
-    # frame had a white mask, so its guidance was thrown away. For C2V keep
-    # the first-frame image and every following edge map as conditioning.
-    mask = [Image.new("L", (width, height), 0) for _ in range(frames)]
+    # Preserve the actual source image as first-frame conditioning.
+    # Remaining edge-control frames guide newly GENERATED video frames;
+    # black masks would instead preserve the visible white-on-black edges.
+    mask = [Image.new("L", (width, height), 0)]
+    mask.extend(Image.new("L", (width, height), 255) for _ in range(frames - 1))
     control[0].save(OUT / "source-image.png")
     control[1].save(OUT / "control-edge-preview.png")
     # Read actual per-device activity, not just torch.cuda.device_count().
@@ -285,7 +285,7 @@ def main():
         (OUT / "last_frame.png").write_bytes((frame_folder / f"frame-{len(saved_frames)-1:04d}.png").read_bytes())
         raw = {
             "version": "v1", "status": "GENERATED_FRAMES_SAVED_UNREVIEWED",
-            "renderer_version": "v10", "frames": len(saved_frames), "fps": fps,
+            "renderer_version": "v12", "frames": len(saved_frames), "fps": fps,
             "frame_directory": "generated-frames",
             "last_frame_sha256": sha256(OUT / "last_frame.png"),
             "human_review_required": True, "approved_to_chain": False,
@@ -327,7 +327,7 @@ def main():
             "video_sha256": sha256(target),
             "last_frame_sha256": sha256(OUT / "last_frame.png"),
             "frames": frames, "fps": fps, "steps": steps, "seed": int(job["seed"]),
-            "renderer_version": "v10", "control_mask": "black_all_frames",
+            "renderer_version": "v12", "control_mask": "first_frame_black_future_white",
             "model_dtype": "float32", "input_luma": round(input_luma, 2),
             "frame_luma": frame_luma,
             "duration_seconds": round(time.time() - started, 2),
@@ -354,7 +354,7 @@ def main():
                     r["utilization_percent"] >= 10 for r in records)
             })
         report = {
-            "version": "v1", "renderer_version": "v11",
+            "version": "v1", "renderer_version": "v12",
             "execution_strategy": "sequential_cpu_offload_cuda0_only",
             "both_gpus_assigned_to_inference": False,
             "samples": gpu_samples, "summary": summaries
