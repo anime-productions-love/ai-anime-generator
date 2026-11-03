@@ -1,5 +1,5 @@
-# Kaggle dual-T4 motion renderer bridge, v1. Manual submit/retrieve only.
-name: Kaggle GPU Motion Renderer (v1)
+# Kaggle dual-T4 motion renderer bridge, v2. Manual submit/retrieve only.
+name: Kaggle GPU Motion Renderer (v2)
 on:
   workflow_dispatch:
     inputs:
@@ -48,25 +48,25 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: kaggle-motion-\${{ github.run_id }}
+  group: kaggle-motion-${{ github.run_id }}
   cancel-in-progress: false
 jobs:
   kaggle-bridge:
-    name: Kaggle \${{ inputs.operation }}
+    name: Kaggle ${{ inputs.operation }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      KAGGLE_API_TOKEN: \${{ secrets.KAGGLE_API_TOKEN }}
-      VIDEO_REPO_TOKEN: \${{ secrets.VIDEO_REPO_TOKEN }}
-      KG_USER: \${{ inputs.kaggle_username }}
-      KG_DATASET: \${{ inputs.dataset_source }}
-      KG_IMAGE: \${{ inputs.image_file }}
-      KG_MOTION: \${{ inputs.motion_file }}
-      KG_PROMPT: \${{ inputs.prompt }}
-      KG_FRAMES: \${{ inputs.frames }}
-      KG_FPS: \${{ inputs.fps }}
-      KG_SOURCE_RUN: \${{ inputs.source_run_id }}
-      KG_KERNEL: \${{ inputs.kernel }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      VIDEO_REPO_TOKEN: ${{ secrets.VIDEO_REPO_TOKEN }}
+      KG_USER: ${{ inputs.kaggle_username }}
+      KG_DATASET: ${{ inputs.dataset_source }}
+      KG_IMAGE: ${{ inputs.image_file }}
+      KG_MOTION: ${{ inputs.motion_file }}
+      KG_PROMPT: ${{ inputs.prompt }}
+      KG_FRAMES: ${{ inputs.frames }}
+      KG_FPS: ${{ inputs.fps }}
+      KG_SOURCE_RUN: ${{ inputs.source_run_id }}
+      KG_KERNEL: ${{ inputs.kernel }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -111,8 +111,8 @@ jobs:
         if: inputs.operation == 'submit'
         uses: actions/upload-artifact@v4
         with:
-          name: kaggle-motion-submission-v1-\${{ github.run_id }}
-          path: \${{ runner.temp }}/kaggle-receipt-v1.json
+          name: kaggle-motion-submission-v1-${{ github.run_id }}
+          path: ${{ runner.temp }}/kaggle-receipt-v1.json
           if-no-files-found: error
           retention-days: 30
       - name: Collect and verify actual Kaggle video
@@ -125,12 +125,12 @@ jobs:
             --source-run-id "$KG_SOURCE_RUN" --kernel "$KG_KERNEL" \
             --output "$RUNNER_TEMP/kaggle-result"
           echo "Downloaded Kaggle video and SHA-verified it. Human review still required." >> "$GITHUB_STEP_SUMMARY"
-      - name: Preserve unapproved output artifact
+      - name: Preserve non-media result receipt
         if: inputs.operation == 'retrieve'
         uses: actions/upload-artifact@v4
         with:
-          name: kaggle-motion-unreviewed-v1-\${{ github.run_id }}
-          path: \${{ runner.temp }}/kaggle-result
+          name: kaggle-motion-receipt-v1-${{ github.run_id }}
+          path: ${{ runner.temp }}/kaggle-result/bridge-result-v1.json
           if-no-files-found: error
           retention-days: 30
       - name: Permanently archive verified output in existing gallery
