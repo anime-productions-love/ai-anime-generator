@@ -1,12 +1,12 @@
-# Kaggle GPU Motion Rendering Integration — v5
+# Kaggle GPU Motion Rendering Integration — v6
 
 ## Implementation status
 
 Uses the existing `anime-productions-love/ai-anime-generator` pipeline:
 
-- [Kaggle GPU Motion Renderer (v6)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
+- [Kaggle GPU Motion Renderer (v7)](../.github/workflows/kaggle-motion-render-v1.yml) — explicit submit/retrieve via GitHub Actions.
 - [Bridge v4](../scripts/kaggle_motion_bridge.py) — extracts and validates Google Drive file IDs before submitting an isolated private Kaggle notebook.
-- [GPU renderer v5](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4 directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
+- [GPU renderer v6](../kaggle/renderer/render.py) — downloads a link-viewable character image and motion MP4/animated WebP/GIF directly from Google Drive at runtime, then runs Wan2.1 VACE 1.3B with edge guidance.
 - [Existing private gallery archiver v3](../scripts/archive_gallery.py) — permanently archives retrieved, checksum-verified results.
 
 **Kaggle dataset storage is NOT used.** No files are temporarily committed to public GitHub. There are no additional workflows, GitHub secrets or GPU systems.
@@ -16,7 +16,7 @@ Uses the existing `anime-productions-love/ai-anime-generator` pipeline:
 Upload two distinct files into Google Drive:
 
 1. A still character image in PNG, JPEG or WebP format.
-2. A motion-reference video saved as MP4.
+2. A motion reference: MP4 video, animated WebP, or animated GIF (must contain at least two frames). Static WebP and GIF files cannot act as motion references.
 
 For **each** file select Share -> General access -> **Anyone with the link** -> **Viewer**, then copy the normal `https://drive.google.com/file/d/FILE_ID/view` link. Anyone possessing such a link can access that media; do not use it for material that must remain strictly private. Shared links are accepted by the public workflow form, so do not include any access tokens, keys, passwords or other confidential query parameters. The bridge extracts the file ID only, and the private Kaggle notebook uses `gdown` to download directly. If Google Drive blocks large file downloads or applies quotas, the render fails with a download error; no file changes are made to Drive.
 
@@ -29,7 +29,7 @@ Go to https://github.com/anime-productions-love/ai-anime-generator/actions/workf
 - `operation`: `submit`
 - `kaggle_username`: `jamesnexus` (or the correct Kaggle account)
 - `image_drive_url`: the copied Google Drive character-image link
-- `motion_drive_url`: the copied Google Drive motion-MP4 link
+- `motion_drive_url`: the copied Google Drive MP4, animated WebP, or animated GIF link
 - `prompt`: a non-confidential description of the intended animation
 - `negative_prompt`: optional description of artifacts to avoid, appended to built-in safeguards
 - `frames`: `17` to begin (request any whole number from 5–81; bridge rounds to nearest supported 4n+1 value, with halfway values rounded upward; requested and applied counts are recorded in submission receipt and job metadata)
