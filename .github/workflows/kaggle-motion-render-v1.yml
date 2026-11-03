@@ -1,5 +1,5 @@
-# Kaggle motion renderer bridge, v17. Source-targeted salvage prints installer diagnostics. Retry after output directory repair.
-name: Kaggle GPU Motion Renderer (v17)
+# Kaggle motion renderer bridge, v18. Include ComfyUI and inference logs in salvage diagnostics.
+name: Kaggle GPU Motion Renderer (v18)
 on:
   push:
     branches: [main]
@@ -195,6 +195,7 @@ jobs:
             tail -c 14000 "$diagnosis"
           done < <(find "$RUNNER_TEMP/kaggle-salvage" -type f \( \
             -name 'failure-inner-v1.json' -o -name 'scail-install-v1.log' \
+            -o -name 'comfyui-v1.log' -o -name 'scail-inference-v1.log' \
             -o -name 'scail-initial-storage-v1.json' -o -name 'scail-preflight-v1.json' \
           \) -print0)
           python3 scripts/archive_gallery.py \
